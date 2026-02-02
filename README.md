@@ -2,6 +2,8 @@
   <h1 align="center">EVE Flipper</h1>
   <p align="center">
     Real-time market arbitrage scanner for EVE Online
+    <br/>
+    <em>Station trading &bull; Hauling &bull; Contract flipping &bull; Trade routes</em>
   </p>
 </p>
 
@@ -238,3 +240,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 ## Disclaimer
 
 EVE Flipper is a third-party tool and is not affiliated with or endorsed by CCP Games. EVE Online and all related trademarks are property of CCP hf. Market data is sourced from the public [EVE Swagger Interface](https://esi.evetech.net/).
+
+---
+
+<details>
+<summary>Keywords</summary>
+
+EVE Online market tool, EVE station trading, EVE hauling calculator, EVE arbitrage scanner, EVE market flipping, EVE ISK making tool, EVE trade route finder, EVE contract scanner, EVE profit calculator, EVE market bot, EVE ESI market data, Jita market scanner, EVE market analysis, New Eden trading, EVE Online trade helper, EVE margin trading tool, EVE cross-region arbitrage, EVE multi-hop trade routes, EVE market flipper, CCP ESI API tool
+
+</details>
