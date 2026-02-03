@@ -18,12 +18,13 @@ const sdeURL = "https://developers.eveonline.com/static-data/eve-online-static-d
 
 // Data holds all parsed SDE data.
 type Data struct {
-	Systems    map[int32]*SolarSystem // systemID -> system
-	SystemByName map[string]int32     // lowercase name -> systemID
-	SystemNames []string              // all system names for autocomplete
-	Types      map[int32]*ItemType    // typeID -> type
-	Stations   map[int64]*Station     // stationID -> station
-	Universe   *graph.Universe
+	Systems      map[int32]*SolarSystem // systemID -> system
+	SystemByName map[string]int32       // lowercase name -> systemID
+	SystemNames  []string               // all system names for autocomplete
+	Types        map[int32]*ItemType    // typeID -> type
+	Stations     map[int64]*Station     // stationID -> station
+	Universe     *graph.Universe
+	Industry     *IndustryData          // blueprints, reprocessing, etc.
 }
 
 // SolarSystem represents an EVE solar system from the SDE.
@@ -97,8 +98,16 @@ func Load(dataDir string) (*Data, error) {
 		}
 	}
 
-	fmt.Printf("SDE loaded: %d systems, %d types, %d stations\n",
-		len(data.Systems), len(data.Types), len(data.Stations))
+	// Load industry data (blueprints, reprocessing)
+	fmt.Println("Loading industry data...")
+	industry, err := data.LoadIndustry(extractDir)
+	if err != nil {
+		return nil, fmt.Errorf("load industry: %w", err)
+	}
+	data.Industry = industry
+
+	fmt.Printf("SDE loaded: %d systems, %d types, %d stations, %d blueprints\n",
+		len(data.Systems), len(data.Types), len(data.Stations), len(data.Industry.Blueprints))
 	return data, nil
 }
 

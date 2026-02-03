@@ -186,6 +186,45 @@ func (d *DB) migrate() error {
 		log.Println("[DB] Applied migration v3 (auth session)")
 	}
 
+	if version < 4 {
+		_, err := d.sql.Exec(`
+			ALTER TABLE scan_history ADD COLUMN params_json TEXT DEFAULT '{}';
+			ALTER TABLE scan_history ADD COLUMN total_profit REAL DEFAULT 0;
+			ALTER TABLE scan_history ADD COLUMN duration_ms INTEGER DEFAULT 0;
+
+			CREATE TABLE IF NOT EXISTS station_results (
+				id           INTEGER PRIMARY KEY AUTOINCREMENT,
+				scan_id      INTEGER NOT NULL REFERENCES scan_history(id),
+				type_id      INTEGER,
+				type_name    TEXT,
+				buy_price    REAL,
+				sell_price   REAL,
+				margin       REAL,
+				margin_pct   REAL,
+				volume       REAL,
+				buy_volume   REAL,
+				sell_volume  REAL,
+				station_id   INTEGER,
+				station_name TEXT,
+				cts          REAL,
+				sds          INTEGER,
+				period_roi   REAL,
+				vwap         REAL,
+				pvi          REAL,
+				obds         REAL,
+				bvs_ratio    REAL,
+				dos          REAL
+			);
+			CREATE INDEX IF NOT EXISTS idx_station_scan ON station_results(scan_id);
+
+			INSERT OR IGNORE INTO schema_version (version) VALUES (4);
+		`)
+		if err != nil {
+			return fmt.Errorf("migration v4: %w", err)
+		}
+		log.Println("[DB] Applied migration v4 (scan history params, station results)")
+	}
+
 	return nil
 }
 

@@ -20,6 +20,40 @@ type CharacterOrder struct {
 	IsBuyOrder   bool    `json:"is_buy_order"`
 	Duration     int     `json:"duration"`
 	Issued       string  `json:"issued"`
+	// Enriched fields (filled by server)
+	TypeName     string `json:"type_name,omitempty"`
+	LocationName string `json:"location_name,omitempty"`
+}
+
+// HistoricalOrder represents a completed/cancelled/expired order.
+type HistoricalOrder struct {
+	OrderID      int64   `json:"order_id"`
+	TypeID       int32   `json:"type_id"`
+	LocationID   int64   `json:"location_id"`
+	RegionID     int32   `json:"region_id"`
+	Price        float64 `json:"price"`
+	VolumeRemain int32   `json:"volume_remain"`
+	VolumeTotal  int32   `json:"volume_total"`
+	IsBuyOrder   bool    `json:"is_buy_order"`
+	State        string  `json:"state"` // cancelled, expired, fulfilled
+	Issued       string  `json:"issued"`
+	// Enriched fields
+	TypeName     string `json:"type_name,omitempty"`
+	LocationName string `json:"location_name,omitempty"`
+}
+
+// WalletTransaction represents a wallet transaction.
+type WalletTransaction struct {
+	TransactionID int64   `json:"transaction_id"`
+	Date          string  `json:"date"`
+	TypeID        int32   `json:"type_id"`
+	LocationID    int64   `json:"location_id"`
+	UnitPrice     float64 `json:"unit_price"`
+	Quantity      int32   `json:"quantity"`
+	IsBuy         bool    `json:"is_buy"`
+	// Enriched fields
+	TypeName     string `json:"type_name,omitempty"`
+	LocationName string `json:"location_name,omitempty"`
 }
 
 // SkillEntry represents a single trained skill.
@@ -65,6 +99,26 @@ func GetSkills(characterID int64, accessToken string) (*SkillSheet, error) {
 		return nil, fmt.Errorf("skills: %w", err)
 	}
 	return &sheet, nil
+}
+
+// GetOrderHistory fetches a character's completed/cancelled/expired orders.
+func GetOrderHistory(characterID int64, accessToken string) ([]HistoricalOrder, error) {
+	url := fmt.Sprintf("%s/characters/%d/orders/history/?datasource=tranquility", baseURL, characterID)
+	var orders []HistoricalOrder
+	if err := authGet(url, accessToken, &orders); err != nil {
+		return nil, fmt.Errorf("order history: %w", err)
+	}
+	return orders, nil
+}
+
+// GetWalletTransactions fetches a character's wallet transactions.
+func GetWalletTransactions(characterID int64, accessToken string) ([]WalletTransaction, error) {
+	url := fmt.Sprintf("%s/characters/%d/wallet/transactions/?datasource=tranquility", baseURL, characterID)
+	var txns []WalletTransaction
+	if err := authGet(url, accessToken, &txns); err != nil {
+		return nil, fmt.Errorf("wallet transactions: %w", err)
+	}
+	return txns, nil
 }
 
 // authGet performs an authenticated GET request to an ESI endpoint.

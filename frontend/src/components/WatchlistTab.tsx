@@ -60,10 +60,9 @@ export function WatchlistTab({ latestResults }: Props) {
       {/* Table */}
       <div className="flex-1 min-h-0 overflow-auto">
         {items.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-eve-dim text-xs">
-            {t("watchlistEmpty")}
-            <br />
-            <span className="text-[10px] mt-1 block text-eve-dim/70">{t("watchlistHint")}</span>
+          <div className="flex flex-col items-center justify-center h-full text-eve-dim text-xs">
+            <span>{t("watchlistEmpty")}</span>
+            <span className="text-[10px] mt-1 text-eve-dim/70">{t("watchlistHint")}</span>
           </div>
         ) : (
           <table className="w-full text-xs">

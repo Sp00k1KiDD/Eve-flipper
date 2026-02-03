@@ -45,22 +45,35 @@ export function ContractResultsTable({ results, scanning, progress }: Props) {
         if (!fval) continue;
         const cellVal = row[col.key];
         if (col.numeric) {
+          // Support filters: "100-500" (range), ">100", ">=100", "<500", "<=500", "=100" (exact), or plain number (>= threshold)
           const num = cellVal as number;
           const trimmed = fval.trim();
           if (trimmed.includes("-") && !trimmed.startsWith("-")) {
+            // Range: "100-500"
             const [minS, maxS] = trimmed.split("-");
             const min = parseFloat(minS);
             const max = parseFloat(maxS);
             if (!isNaN(min) && !isNaN(max) && (num < min || num > max)) return false;
+          } else if (trimmed.startsWith(">=")) {
+            const min = parseFloat(trimmed.slice(2));
+            if (!isNaN(min) && num < min) return false;
           } else if (trimmed.startsWith(">")) {
             const min = parseFloat(trimmed.slice(1));
             if (!isNaN(min) && num <= min) return false;
+          } else if (trimmed.startsWith("<=")) {
+            const max = parseFloat(trimmed.slice(2));
+            if (!isNaN(max) && num > max) return false;
           } else if (trimmed.startsWith("<")) {
             const max = parseFloat(trimmed.slice(1));
             if (!isNaN(max) && num >= max) return false;
+          } else if (trimmed.startsWith("=")) {
+            // Exact match
+            const target = parseFloat(trimmed.slice(1));
+            if (!isNaN(target) && num !== target) return false;
           } else {
-            const target = parseFloat(trimmed);
-            if (!isNaN(target) && !String(num).includes(trimmed)) return false;
+            // Plain number: treat as >= (minimum threshold)
+            const min = parseFloat(trimmed);
+            if (!isNaN(min) && num < min) return false;
           }
         } else {
           if (!String(cellVal).toLowerCase().includes(fval.toLowerCase())) return false;

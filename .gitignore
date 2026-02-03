@@ -55,3 +55,4 @@ desktop.ini
 .env.*.local
 frontend/.env
 frontend/.env.local
+NUL

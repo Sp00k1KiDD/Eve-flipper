@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { FlipResult, WatchlistItem } from "@/lib/types";
 import { formatISK, formatMargin } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { getWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/api";
+import { useGlobalToast } from "./Toast";
 
 type SortKey = keyof FlipResult;
 type SortDir = "asc" | "desc";
@@ -38,6 +39,7 @@ function rowKey(row: FlipResult) {
 
 export function ScanResultsTable({ results, scanning, progress }: Props) {
   const { t } = useI18n();
+  const { addToast } = useGlobalToast();
 
   // Sort
   const [sortKey, setSortKey] = useState<SortKey>("TotalProfit");
@@ -58,6 +60,36 @@ export function ScanResultsTable({ results, scanning, progress }: Props) {
 
   // Context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: FlipResult } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Adjust context menu position to stay within viewport
+  useEffect(() => {
+    if (contextMenu && contextMenuRef.current) {
+      const menu = contextMenuRef.current;
+      const rect = menu.getBoundingClientRect();
+      const padding = 10;
+      
+      let x = contextMenu.x;
+      let y = contextMenu.y;
+      
+      // Adjust if menu goes off right edge
+      if (x + rect.width > window.innerWidth - padding) {
+        x = window.innerWidth - rect.width - padding;
+      }
+      
+      // Adjust if menu goes off bottom edge
+      if (y + rect.height > window.innerHeight - padding) {
+        y = window.innerHeight - rect.height - padding;
+      }
+      
+      // Ensure menu doesn't go off left or top edges
+      x = Math.max(padding, x);
+      y = Math.max(padding, y);
+      
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+    }
+  }, [contextMenu]);
 
   // Filter logic
   const filtered = useMemo(() => {
@@ -68,23 +100,35 @@ export function ScanResultsTable({ results, scanning, progress }: Props) {
         if (!fval) continue;
         const cellVal = row[col.key];
         if (col.numeric) {
-          // Support range: "100-500", ">100", "<500", or plain number
+          // Support filters: "100-500" (range), ">100", ">=100", "<500", "<=500", "=100" (exact), or plain number (>= threshold)
           const num = cellVal as number;
           const trimmed = fval.trim();
           if (trimmed.includes("-") && !trimmed.startsWith("-")) {
+            // Range: "100-500"
             const [minS, maxS] = trimmed.split("-");
             const min = parseFloat(minS);
             const max = parseFloat(maxS);
             if (!isNaN(min) && !isNaN(max) && (num < min || num > max)) return false;
+          } else if (trimmed.startsWith(">=")) {
+            const min = parseFloat(trimmed.slice(2));
+            if (!isNaN(min) && num < min) return false;
           } else if (trimmed.startsWith(">")) {
             const min = parseFloat(trimmed.slice(1));
             if (!isNaN(min) && num <= min) return false;
+          } else if (trimmed.startsWith("<=")) {
+            const max = parseFloat(trimmed.slice(2));
+            if (!isNaN(max) && num > max) return false;
           } else if (trimmed.startsWith("<")) {
             const max = parseFloat(trimmed.slice(1));
             if (!isNaN(max) && num >= max) return false;
+          } else if (trimmed.startsWith("=")) {
+            // Exact match
+            const target = parseFloat(trimmed.slice(1));
+            if (!isNaN(target) && num !== target) return false;
           } else {
-            const target = parseFloat(trimmed);
-            if (!isNaN(target) && !String(num).includes(trimmed)) return false;
+            // Plain number: treat as >= (minimum threshold)
+            const min = parseFloat(trimmed);
+            if (!isNaN(min) && num < min) return false;
           }
         } else {
           if (!String(cellVal).toLowerCase().includes(fval.toLowerCase())) return false;
@@ -183,6 +227,7 @@ export function ScanResultsTable({ results, scanning, progress }: Props) {
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text);
+    addToast(t("copied"), "success", 2000);
     setContextMenu(null);
   };
 
@@ -207,6 +252,7 @@ export function ScanResultsTable({ results, scanning, progress }: Props) {
     a.download = `eve-flipper-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+    addToast(`${t("exportCSV")}: ${rows.length} rows`, "success", 2000);
   };
 
   // Copy table to clipboard
@@ -217,6 +263,7 @@ export function ScanResultsTable({ results, scanning, progress }: Props) {
       columnDefs.map((col) => formatCell(col, row)).join("\t")
     );
     navigator.clipboard.writeText([header, ...tsvRows].join("\n"));
+    addToast(t("copied"), "success", 2000);
   };
 
   const formatCell = (col: (typeof columnDefs)[number], row: FlipResult): string => {
@@ -424,6 +471,7 @@ export function ScanResultsTable({ results, scanning, progress }: Props) {
         <>
           <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} />
           <div
+            ref={contextMenuRef}
             className="fixed z-50 bg-eve-panel border border-eve-border rounded-sm shadow-eve-glow-strong py-1 min-w-[200px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >

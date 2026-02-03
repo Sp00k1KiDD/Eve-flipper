@@ -3,6 +3,15 @@ import type { StationTrade, StationInfo, ScanParams } from "@/lib/types";
 import { getStations, scanStation } from "@/lib/api";
 import { formatISK, formatMargin, formatNumber } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
+import { MetricTooltip } from "./Tooltip";
+import {
+  TabSettingsPanel,
+  SettingsField,
+  SettingsNumberInput,
+  SettingsCheckbox,
+  SettingsGrid,
+  SettingsSelect,
+} from "./TabSettingsPanel";
 
 type SortKey = keyof StationTrade;
 type SortDir = "asc" | "desc";
@@ -10,6 +19,21 @@ type SortDir = "asc" | "desc";
 interface Props {
   params: ScanParams;
 }
+
+// Metric tooltip keys mapping
+type MetricTooltipKey = "CTS" | "SDS" | "PVI" | "VWAP" | "OBDS" | "DOS" | "BvSRatio" | "PeriodROI" | "NowROI";
+
+const metricTooltipKeys: Partial<Record<SortKey, MetricTooltipKey>> = {
+  CTS: "CTS",
+  SDS: "SDS",
+  PVI: "PVI",
+  VWAP: "VWAP",
+  OBDS: "OBDS",
+  DOS: "DOS",
+  BvSRatio: "BvSRatio",
+  PeriodROI: "PeriodROI",
+  NowROI: "NowROI",
+};
 
 const columnDefs: { key: SortKey; labelKey: TranslationKey; width: string; numeric: boolean }[] = [
   { key: "TypeName", labelKey: "colItem", width: "min-w-[150px]", numeric: false },
@@ -27,65 +51,6 @@ const columnDefs: { key: SortKey; labelKey: TranslationKey; width: string; numer
 
 // Sentinel value for "All stations"
 const ALL_STATIONS_ID = 0;
-
-// Collapsible section component
-function FilterSection({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen ?? false);
-  return (
-    <div className="border border-eve-border rounded-sm mb-2">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-2 py-1 text-xs text-eve-dim hover:text-eve-accent transition-colors"
-      >
-        <span className="font-medium uppercase tracking-wider">{title}</span>
-        <span>{open ? "▼" : "▶"}</span>
-      </button>
-      {open && <div className="px-2 pb-2 flex flex-wrap gap-3">{children}</div>}
-    </div>
-  );
-}
-
-// Small input component
-function SmallInput({ label, value, onChange, min, max, step, className }: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  className?: string;
-}) {
-  return (
-    <div className={`flex items-center gap-1 ${className || ''}`}>
-      <label className="text-eve-dim text-xs whitespace-nowrap">{label}:</label>
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        step={step}
-        min={min}
-        max={max}
-        className="w-16 bg-eve-input border border-eve-border rounded-sm px-1 py-0.5 text-eve-text text-xs
-                   [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-      />
-    </div>
-  );
-}
-
-// Checkbox input
-function CheckboxInput({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-1 text-xs text-eve-dim cursor-pointer">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="accent-eve-accent"
-      />
-      {label}
-    </label>
-  );
-}
 
 export function StationTrading({ params }: Props) {
   const { t } = useI18n();
@@ -278,75 +243,136 @@ export function StationTrading({ params }: Props) {
     return "text-green-400";
   };
 
+  // Build station options for select
+  const stationOptions = useMemo(() => {
+    const opts = [{ value: ALL_STATIONS_ID, label: t("allStations") }];
+    for (const st of stations) {
+      opts.push({ value: st.id, label: st.name });
+    }
+    return opts;
+  }, [stations, t]);
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Controls */}
-      <div className="shrink-0 px-2 py-1.5 border-b border-eve-border">
-        {/* Main controls row */}
-        <div className="flex items-center gap-3 text-xs flex-wrap mb-2">
-          {/* Station selector */}
-          <label className="text-eve-dim">{t("stationSelect")}:</label>
-          {loadingStations ? (
-            <span className="text-eve-dim">{t("loadingStations")}</span>
-          ) : stations.length === 0 ? (
-            <span className="text-eve-dim">{t("noStations")}</span>
-          ) : (
-            <select
-              value={selectedStationId}
-              onChange={(e) => setSelectedStationId(Number(e.target.value))}
-              className="bg-eve-input border border-eve-border rounded-sm px-2 py-1 text-eve-text text-xs max-w-[300px] truncate"
+      {/* Settings Panel - unified design */}
+      <div className="shrink-0 m-2">
+        <TabSettingsPanel
+          title={t("stationSettings")}
+          hint={t("stationSettingsHint")}
+          icon="🏪"
+          defaultExpanded={true}
+        >
+          {/* Station & Basic Settings */}
+          <SettingsGrid cols={5}>
+            <SettingsField label={t("stationSelect")}>
+              {loadingStations ? (
+                <div className="h-[34px] flex items-center text-xs text-eve-dim">{t("loadingStations")}</div>
+              ) : stations.length === 0 ? (
+                <div className="h-[34px] flex items-center text-xs text-eve-dim">{t("noStations")}</div>
+              ) : (
+                <SettingsSelect
+                  value={selectedStationId}
+                  onChange={(v) => setSelectedStationId(Number(v))}
+                  options={stationOptions}
+                />
+              )}
+            </SettingsField>
+
+            <SettingsField label={t("stationRadius")}>
+              <SettingsNumberInput
+                value={radius}
+                onChange={(v) => setRadius(Math.max(0, Math.min(50, v)))}
+                min={0}
+                max={50}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("brokerFee")}>
+              <SettingsNumberInput
+                value={brokerFee}
+                onChange={setBrokerFee}
+                min={0}
+                max={10}
+                step={0.1}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("minDailyVolume")}>
+              <SettingsNumberInput
+                value={minDailyVolume}
+                onChange={setMinDailyVolume}
+                min={0}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("minItemProfit")}>
+              <SettingsNumberInput
+                value={minItemProfit}
+                onChange={setMinItemProfit}
+                min={0}
+              />
+            </SettingsField>
+          </SettingsGrid>
+
+          {/* Advanced Filters - collapsible subsection */}
+          <details className="mt-3 group">
+            <summary className="cursor-pointer text-xs text-eve-dim hover:text-eve-accent transition-colors flex items-center gap-1">
+              <span className="group-open:rotate-90 transition-transform">▶</span>
+              {t("advancedFilters")}
+            </summary>
+            <div className="mt-3 pt-3 border-t border-eve-border/30">
+              <SettingsGrid cols={5}>
+                <SettingsField label={t("minDemandPerDay")}>
+                  <SettingsNumberInput value={minDemandPerDay} onChange={setMinDemandPerDay} min={0} step={0.1} />
+                </SettingsField>
+                <SettingsField label={t("avgPricePeriod")}>
+                  <SettingsNumberInput value={avgPricePeriod} onChange={setAvgPricePeriod} min={7} max={365} />
+                </SettingsField>
+                <SettingsField label={t("minPeriodROI")}>
+                  <SettingsNumberInput value={minPeriodROI} onChange={setMinPeriodROI} min={0} />
+                </SettingsField>
+                <SettingsField label={t("maxPVI")}>
+                  <SettingsNumberInput value={maxPVI} onChange={setMaxPVI} min={0} />
+                </SettingsField>
+                <SettingsField label={t("maxSDS")}>
+                  <SettingsNumberInput value={maxSDS} onChange={setMaxSDS} min={0} max={100} />
+                </SettingsField>
+              </SettingsGrid>
+              <div className="mt-3">
+                <SettingsGrid cols={4}>
+                  <SettingsField label={t("bvsRatioMin")}>
+                    <SettingsNumberInput value={bvsRatioMin} onChange={setBvsRatioMin} min={0} step={0.1} />
+                  </SettingsField>
+                  <SettingsField label={t("bvsRatioMax")}>
+                    <SettingsNumberInput value={bvsRatioMax} onChange={setBvsRatioMax} min={0} step={0.1} />
+                  </SettingsField>
+                  <SettingsField label={t("limitBuyToPriceLow")}>
+                    <SettingsCheckbox checked={limitBuyToPriceLow} onChange={setLimitBuyToPriceLow} />
+                  </SettingsField>
+                  <SettingsField label={t("flagExtremePrices")}>
+                    <SettingsCheckbox checked={flagExtremePrices} onChange={setFlagExtremePrices} />
+                  </SettingsField>
+                </SettingsGrid>
+              </div>
+            </div>
+          </details>
+
+          {/* Scan button inside settings */}
+          <div className="mt-3 pt-3 border-t border-eve-border/30 flex justify-end">
+            <button
+              onClick={handleScan}
+              disabled={!canScan}
+              className={`px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all
+                ${scanning
+                  ? "bg-eve-error/80 text-white hover:bg-eve-error"
+                  : "bg-eve-accent text-eve-dark hover:bg-eve-accent-hover shadow-eve-glow"
+                }
+                disabled:bg-eve-input disabled:text-eve-dim disabled:cursor-not-allowed disabled:shadow-none`}
             >
-              <option value={ALL_STATIONS_ID}>{t("allStations")}</option>
-              {stations.map((st) => (
-                <option key={st.id} value={st.id}>
-                  {st.name}
-                </option>
-              ))}
-            </select>
-          )}
-
-          <SmallInput label={t("stationRadius")} value={radius} onChange={(v) => setRadius(Math.max(0, Math.min(50, v)))} min={0} max={50} />
-          <SmallInput label={t("brokerFee")} value={brokerFee} onChange={setBrokerFee} min={0} max={10} step={0.1} />
-
-          <div className="flex-1" />
-
-          {/* Scan button */}
-          <button
-            onClick={handleScan}
-            disabled={!canScan}
-            className={`px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all
-              ${scanning
-                ? "bg-eve-error/80 text-white hover:bg-eve-error"
-                : "bg-eve-accent text-eve-dark hover:bg-eve-accent-hover shadow-eve-glow"
-              }
-              disabled:bg-eve-input disabled:text-eve-dim disabled:cursor-not-allowed disabled:shadow-none`}
-          >
-            {scanning ? t("stop") : t("scan")}
-          </button>
-        </div>
-
-        {/* Filter sections */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-          <FilterSection title={t("profitFilters")} defaultOpen={true}>
-            <SmallInput label={t("minItemProfit")} value={minItemProfit} onChange={setMinItemProfit} min={0} />
-            <SmallInput label={t("minDailyVolume")} value={minDailyVolume} onChange={setMinDailyVolume} min={0} />
-            <SmallInput label={t("minDemandPerDay")} value={minDemandPerDay} onChange={setMinDemandPerDay} min={0} step={0.1} />
-          </FilterSection>
-
-          <FilterSection title={t("riskProfile")}>
-            <SmallInput label={t("avgPricePeriod")} value={avgPricePeriod} onChange={setAvgPricePeriod} min={7} max={365} />
-            <SmallInput label={t("minPeriodROI")} value={minPeriodROI} onChange={setMinPeriodROI} min={0} />
-            <SmallInput label={t("maxPVI")} value={maxPVI} onChange={setMaxPVI} min={0} />
-            <SmallInput label={t("maxSDS")} value={maxSDS} onChange={setMaxSDS} min={0} max={100} />
-          </FilterSection>
-
-          <FilterSection title={t("bvsAndLimits")}>
-            <SmallInput label={t("bvsRatioMin")} value={bvsRatioMin} onChange={setBvsRatioMin} min={0} step={0.1} />
-            <SmallInput label={t("bvsRatioMax")} value={bvsRatioMax} onChange={setBvsRatioMax} min={0} step={0.1} />
-            <CheckboxInput label={t("limitBuyToPriceLow")} checked={limitBuyToPriceLow} onChange={setLimitBuyToPriceLow} />
-            <CheckboxInput label={t("flagExtremePrices")} checked={flagExtremePrices} onChange={setFlagExtremePrices} />
-          </FilterSection>
-        </div>
+              {scanning ? t("stop") : t("scan")}
+            </button>
+          </div>
+        </TabSettingsPanel>
       </div>
 
       {/* Status */}
@@ -372,22 +398,30 @@ export function StationTrading({ params }: Props) {
           <thead className="sticky top-0 z-10">
             <tr className="bg-eve-dark border-b border-eve-border">
               <th className="min-w-[24px] px-1 py-2"></th>
-              {columnDefs.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => toggleSort(col.key)}
-                  className={`${col.width} px-2 py-2 text-left text-[10px] uppercase tracking-wider
-                    text-eve-dim font-medium cursor-pointer select-none
-                    hover:text-eve-accent transition-colors ${
-                      sortKey === col.key ? "text-eve-accent" : ""
-                    }`}
-                >
-                  {t(col.labelKey)}
-                  {sortKey === col.key && (
-                    <span className="ml-1">{sortDir === "asc" ? "▲" : "▼"}</span>
-                  )}
-                </th>
-              ))}
+              {columnDefs.map((col) => {
+                const tooltipKey = metricTooltipKeys[col.key];
+                return (
+                  <th
+                    key={col.key}
+                    onClick={() => toggleSort(col.key)}
+                    className={`${col.width} px-2 py-2 text-left text-[10px] uppercase tracking-wider
+                      text-eve-dim font-medium cursor-pointer select-none
+                      hover:text-eve-accent transition-colors ${
+                        sortKey === col.key ? "text-eve-accent" : ""
+                      }`}
+                  >
+                    <span className="inline-flex items-center">
+                      {t(col.labelKey)}
+                      {sortKey === col.key && (
+                        <span className="ml-1">{sortDir === "asc" ? "▲" : "▼"}</span>
+                      )}
+                      {tooltipKey && (
+                        <MetricTooltipContent metricKey={tooltipKey} t={t} />
+                      )}
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -443,5 +477,37 @@ export function StationTrading({ params }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+// Helper component for metric tooltips
+function MetricTooltipContent({ 
+  metricKey, 
+  t 
+}: { 
+  metricKey: MetricTooltipKey; 
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+}) {
+  const tooltipData: Record<MetricTooltipKey, { titleKey: TranslationKey; descKey: TranslationKey; goodKey?: TranslationKey; badKey?: TranslationKey }> = {
+    CTS: { titleKey: "metricCTSTitle", descKey: "metricCTSDesc", goodKey: "metricCTSGood", badKey: "metricCTSBad" },
+    SDS: { titleKey: "metricSDSTitle", descKey: "metricSDSDesc", goodKey: "metricSDSGood", badKey: "metricSDSBad" },
+    PVI: { titleKey: "metricPVITitle", descKey: "metricPVIDesc", goodKey: "metricPVIGood", badKey: "metricPVIBad" },
+    VWAP: { titleKey: "metricVWAPTitle", descKey: "metricVWAPDesc" },
+    OBDS: { titleKey: "metricOBDSTitle", descKey: "metricOBDSDesc" },
+    DOS: { titleKey: "metricDOSTitle", descKey: "metricDOSDesc", goodKey: "metricDOSGood", badKey: "metricDOSBad" },
+    BvSRatio: { titleKey: "metricBvSTitle", descKey: "metricBvSDesc", goodKey: "metricBvSGood", badKey: "metricBvSBad" },
+    PeriodROI: { titleKey: "metricPeriodROITitle", descKey: "metricPeriodROIDesc" },
+    NowROI: { titleKey: "metricNowROITitle", descKey: "metricNowROIDesc" },
+  };
+
+  const data = tooltipData[metricKey];
+  
+  return (
+    <MetricTooltip
+      title={t(data.titleKey)}
+      description={t(data.descKey)}
+      goodRange={data.goodKey ? t(data.goodKey) : undefined}
+      badRange={data.badKey ? t(data.badKey) : undefined}
+    />
   );
 }

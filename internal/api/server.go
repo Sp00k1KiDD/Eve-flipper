@@ -20,16 +20,17 @@ import (
 
 // Server is the HTTP API server that connects the ESI client, scanner engine, and database.
 type Server struct {
-	cfg      *config.Config
-	sdeData  *sde.Data
-	scanner  *engine.Scanner
-	esi      *esi.Client
-	db       *db.DB
-	sso      *auth.SSOConfig
-	sessions *auth.SessionStore
-	mu       sync.RWMutex
-	ready    bool
-	ssoState string // CSRF state for current login flow
+	cfg              *config.Config
+	sdeData          *sde.Data
+	scanner          *engine.Scanner
+	industryAnalyzer *engine.IndustryAnalyzer
+	esi              *esi.Client
+	db               *db.DB
+	sso              *auth.SSOConfig
+	sessions         *auth.SessionStore
+	mu               sync.RWMutex
+	ready            bool
+	ssoState         string // CSRF state for current login flow
 }
 
 // NewServer creates a Server with the given config, ESI client, and database.
@@ -51,6 +52,7 @@ func (s *Server) SetSDE(data *sde.Data) {
 	scanner := engine.NewScanner(data, s.esi)
 	scanner.History = s.db
 	s.scanner = scanner
+	s.industryAnalyzer = engine.NewIndustryAnalyzer(data, s.esi)
 	s.ready = true
 }
 
@@ -78,12 +80,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/scan/station", s.handleScanStation)
 	mux.HandleFunc("GET /api/stations", s.handleGetStations)
 	mux.HandleFunc("GET /api/scan/history", s.handleGetHistory)
+	mux.HandleFunc("GET /api/scan/history/{id}", s.handleGetHistoryByID)
+	mux.HandleFunc("GET /api/scan/history/{id}/results", s.handleGetHistoryResults)
+	mux.HandleFunc("DELETE /api/scan/history/{id}", s.handleDeleteHistory)
+	mux.HandleFunc("POST /api/scan/history/clear", s.handleClearHistory)
 	// Auth
 	mux.HandleFunc("GET /api/auth/login", s.handleAuthLogin)
 	mux.HandleFunc("GET /api/auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("GET /api/auth/character", s.handleAuthCharacter)
+	// Industry
+	mux.HandleFunc("POST /api/industry/analyze", s.handleIndustryAnalyze)
+	mux.HandleFunc("GET /api/industry/search", s.handleIndustrySearch)
+	mux.HandleFunc("GET /api/industry/systems", s.handleIndustrySystems)
+	mux.HandleFunc("GET /api/industry/status", s.handleIndustryStatus)
 	return corsMiddleware(mux)
 }
 
@@ -210,6 +221,11 @@ type scanRequest struct {
 	MinDailyVolume int64   `json:"min_daily_volume"`
 	MaxInvestment  float64 `json:"max_investment"`
 	MaxResults     int     `json:"max_results"`
+	// Contract-specific filters
+	MinContractPrice  float64 `json:"min_contract_price"`
+	MaxContractMargin float64 `json:"max_contract_margin"`
+	MinPricedRatio    float64 `json:"min_priced_ratio"`
+	RequireHistory    bool    `json:"require_history"`
 }
 
 func (s *Server) parseScanParams(req scanRequest) (engine.ScanParams, error) {
@@ -225,15 +241,19 @@ func (s *Server) parseScanParams(req scanRequest) (engine.ScanParams, error) {
 	}
 
 	return engine.ScanParams{
-		CurrentSystemID: systemID,
-		CargoCapacity:   req.CargoCapacity,
-		BuyRadius:       req.BuyRadius,
-		SellRadius:      req.SellRadius,
-		MinMargin:       req.MinMargin,
-		SalesTaxPercent: req.SalesTaxPercent,
-		MinDailyVolume:  req.MinDailyVolume,
-		MaxInvestment:   req.MaxInvestment,
-		MaxResults:      req.MaxResults,
+		CurrentSystemID:   systemID,
+		CargoCapacity:     req.CargoCapacity,
+		BuyRadius:         req.BuyRadius,
+		SellRadius:        req.SellRadius,
+		MinMargin:         req.MinMargin,
+		SalesTaxPercent:   req.SalesTaxPercent,
+		MinDailyVolume:    req.MinDailyVolume,
+		MaxInvestment:     req.MaxInvestment,
+		MaxResults:        req.MaxResults,
+		MinContractPrice:  req.MinContractPrice,
+		MaxContractMargin: req.MaxContractMargin,
+		MinPricedRatio:    req.MinPricedRatio,
+		RequireHistory:    req.RequireHistory,
 	}, nil
 }
 
@@ -265,6 +285,8 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] Scan starting: system=%d, cargo=%.0f, buyR=%d, sellR=%d, margin=%.1f, tax=%.1f",
 		params.CurrentSystemID, params.CargoCapacity, params.BuyRadius, params.SellRadius, params.MinMargin, params.SalesTaxPercent)
 
+	startTime := time.Now()
+
 	results, err := scanner.Scan(params, func(msg string) {
 		line, _ := json.Marshal(map[string]string{"type": "progress", "message": msg})
 		fmt.Fprintf(w, "%s\n", line)
@@ -278,17 +300,21 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[API] Scan complete: %d results", len(results))
+	durationMs := time.Since(startTime).Milliseconds()
+	log.Printf("[API] Scan complete: %d results in %dms", len(results), durationMs)
+
 	topProfit := 0.0
+	totalProfit := 0.0
 	for _, r := range results {
 		if r.TotalProfit > topProfit {
 			topProfit = r.TotalProfit
 		}
+		totalProfit += r.TotalProfit
 	}
-	scanID := s.db.InsertHistory("radius", req.SystemName, len(results), topProfit)
+	scanID := s.db.InsertHistoryFull("radius", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertFlipResults(scanID, results)
 
-	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results)})
+	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results), "scan_id": scanID})
 	if marshalErr != nil {
 		log.Printf("[API] Scan JSON marshal error: %v", marshalErr)
 		errLine, _ := json.Marshal(map[string]string{"type": "error", "message": "JSON: " + marshalErr.Error()})
@@ -328,6 +354,8 @@ func (s *Server) handleScanMultiRegion(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] ScanMultiRegion starting: system=%d, cargo=%.0f, buyR=%d, sellR=%d",
 		params.CurrentSystemID, params.CargoCapacity, params.BuyRadius, params.SellRadius)
 
+	startTime := time.Now()
+
 	results, err := scanner.ScanMultiRegion(params, func(msg string) {
 		line, _ := json.Marshal(map[string]string{"type": "progress", "message": msg})
 		fmt.Fprintf(w, "%s\n", line)
@@ -341,17 +369,21 @@ func (s *Server) handleScanMultiRegion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[API] ScanMultiRegion complete: %d results", len(results))
-	tp := 0.0
+	durationMs := time.Since(startTime).Milliseconds()
+	log.Printf("[API] ScanMultiRegion complete: %d results in %dms", len(results), durationMs)
+
+	topProfit := 0.0
+	totalProfit := 0.0
 	for _, r := range results {
-		if r.TotalProfit > tp {
-			tp = r.TotalProfit
+		if r.TotalProfit > topProfit {
+			topProfit = r.TotalProfit
 		}
+		totalProfit += r.TotalProfit
 	}
-	scanID := s.db.InsertHistory("region", req.SystemName, len(results), tp)
+	scanID := s.db.InsertHistoryFull("region", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertFlipResults(scanID, results)
 
-	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results)})
+	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results), "scan_id": scanID})
 	if marshalErr != nil {
 		log.Printf("[API] ScanMultiRegion JSON marshal error: %v", marshalErr)
 		errLine, _ := json.Marshal(map[string]string{"type": "error", "message": "JSON: " + marshalErr.Error()})
@@ -391,6 +423,8 @@ func (s *Server) handleScanContracts(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] ScanContracts starting: system=%d, buyR=%d, margin=%.1f, tax=%.1f",
 		params.CurrentSystemID, params.BuyRadius, params.MinMargin, params.SalesTaxPercent)
 
+	startTime := time.Now()
+
 	results, err := scanner.ScanContracts(params, func(msg string) {
 		line, _ := json.Marshal(map[string]string{"type": "progress", "message": msg})
 		fmt.Fprintf(w, "%s\n", line)
@@ -404,17 +438,21 @@ func (s *Server) handleScanContracts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[API] ScanContracts complete: %d results", len(results))
-	tp := 0.0
+	durationMs := time.Since(startTime).Milliseconds()
+	log.Printf("[API] ScanContracts complete: %d results in %dms", len(results), durationMs)
+
+	topProfit := 0.0
+	totalProfit := 0.0
 	for _, r := range results {
-		if r.Profit > tp {
-			tp = r.Profit
+		if r.Profit > topProfit {
+			topProfit = r.Profit
 		}
+		totalProfit += r.Profit
 	}
-	scanID := s.db.InsertHistory("contracts", req.SystemName, len(results), tp)
+	scanID := s.db.InsertHistoryFull("contracts", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertContractResults(scanID, results)
 
-	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results)})
+	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results), "scan_id": scanID})
 	if marshalErr != nil {
 		log.Printf("[API] ScanContracts JSON marshal error: %v", marshalErr)
 		errLine, _ := json.Marshal(map[string]string{"type": "error", "message": "JSON: " + marshalErr.Error()})
@@ -654,6 +692,8 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] ScanStation starting: stations=%d, regions=%d, margin=%.1f, tax=%.1f, broker=%.1f",
 		len(stationIDs), len(regionIDs), req.MinMargin, req.SalesTaxPercent, req.BrokerFee)
 
+	startTime := time.Now()
+
 	// Scan each region and merge results
 	var allResults []engine.StationTrade
 	for regionID := range regionIDs {
@@ -692,16 +732,26 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 		allResults = append(allResults, results...)
 	}
 
-	log.Printf("[API] ScanStation complete: %d results", len(allResults))
-	tp := 0.0
-	for _, r := range allResults {
-		if r.TotalProfit > tp {
-			tp = r.TotalProfit
-		}
-	}
-	s.db.InsertHistory("station", historyLabel, len(allResults), tp)
+	durationMs := time.Since(startTime).Milliseconds()
+	log.Printf("[API] ScanStation complete: %d results in %dms", len(allResults), durationMs)
 
-	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": allResults, "count": len(allResults)})
+	// Calculate totals
+	topProfit := 0.0
+	totalProfit := 0.0
+	for _, r := range allResults {
+		if r.TotalProfit > topProfit {
+			topProfit = r.TotalProfit
+		}
+		totalProfit += r.TotalProfit
+	}
+
+	// Save to history with full params
+	scanID := s.db.InsertHistoryFull("station", historyLabel, len(allResults), topProfit, totalProfit, durationMs, req)
+	if scanID > 0 {
+		s.db.InsertStationResults(scanID, allResults)
+	}
+
+	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": allResults, "count": len(allResults), "scan_id": scanID})
 	if marshalErr != nil {
 		log.Printf("[API] ScanStation JSON marshal error: %v", marshalErr)
 		errLine, _ := json.Marshal(map[string]string{"type": "error", "message": "JSON: " + marshalErr.Error()})
@@ -773,7 +823,91 @@ func (s *Server) handleGetStations(w http.ResponseWriter, r *http.Request) {
 // --- Scan History ---
 
 func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.db.GetHistory(50))
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	writeJSON(w, s.db.GetHistory(limit))
+}
+
+func (s *Server) handleGetHistoryByID(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, 400, "invalid id")
+		return
+	}
+	record := s.db.GetHistoryByID(id)
+	if record == nil {
+		writeError(w, 404, "not found")
+		return
+	}
+	writeJSON(w, record)
+}
+
+func (s *Server) handleGetHistoryResults(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, 400, "invalid id")
+		return
+	}
+
+	record := s.db.GetHistoryByID(id)
+	if record == nil {
+		writeError(w, 404, "not found")
+		return
+	}
+
+	var results interface{}
+	switch record.Tab {
+	case "station":
+		results = s.db.GetStationResults(id)
+	case "contracts":
+		results = s.db.GetContractResults(id)
+	default:
+		results = s.db.GetFlipResults(id)
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"scan":    record,
+		"results": results,
+	})
+}
+
+func (s *Server) handleDeleteHistory(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeError(w, 400, "invalid id")
+		return
+	}
+	if err := s.db.DeleteHistory(id); err != nil {
+		writeError(w, 500, "delete failed: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleClearHistory(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OlderThanDays int `json:"older_than_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.OlderThanDays = 7 // default: clear older than 7 days
+	}
+	if req.OlderThanDays < 1 {
+		req.OlderThanDays = 7
+	}
+	count, err := s.db.ClearHistory(req.OlderThanDays)
+	if err != nil {
+		writeError(w, 500, "clear failed: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]interface{}{"status": "cleared", "deleted": count})
 }
 
 // --- Auth ---
@@ -876,11 +1010,13 @@ func (s *Server) handleAuthCharacter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type charInfo struct {
-		CharacterID   int64                `json:"character_id"`
-		CharacterName string               `json:"character_name"`
-		Wallet        float64              `json:"wallet"`
-		Orders        []esi.CharacterOrder `json:"orders"`
-		Skills        *esi.SkillSheet      `json:"skills"`
+		CharacterID   int64                    `json:"character_id"`
+		CharacterName string                   `json:"character_name"`
+		Wallet        float64                  `json:"wallet"`
+		Orders        []esi.CharacterOrder     `json:"orders"`
+		OrderHistory  []esi.HistoricalOrder    `json:"order_history"`
+		Transactions  []esi.WalletTransaction  `json:"transactions"`
+		Skills        *esi.SkillSheet          `json:"skills"`
 	}
 
 	result := charInfo{
@@ -895,11 +1031,25 @@ func (s *Server) handleAuthCharacter(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[AUTH] Wallet error: %v", err)
 	}
 
-	// Fetch orders
+	// Fetch active orders
 	if orders, err := esi.GetCharacterOrders(sess.CharacterID, token); err == nil {
 		result.Orders = orders
 	} else {
 		log.Printf("[AUTH] Orders error: %v", err)
+	}
+
+	// Fetch order history
+	if history, err := esi.GetOrderHistory(sess.CharacterID, token); err == nil {
+		result.OrderHistory = history
+	} else {
+		log.Printf("[AUTH] Order history error: %v", err)
+	}
+
+	// Fetch wallet transactions
+	if txns, err := esi.GetWalletTransactions(sess.CharacterID, token); err == nil {
+		result.Transactions = txns
+	} else {
+		log.Printf("[AUTH] Transactions error: %v", err)
 	}
 
 	// Fetch skills
@@ -909,5 +1059,250 @@ func (s *Server) handleAuthCharacter(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[AUTH] Skills error: %v", err)
 	}
 
+	// Enrich orders with type/location names
+	s.mu.RLock()
+	sdeData := s.sdeData
+	s.mu.RUnlock()
+
+	if sdeData != nil {
+		// Collect all location IDs for prefetch
+		locationIDs := make(map[int64]bool)
+		for _, o := range result.Orders {
+			locationIDs[o.LocationID] = true
+		}
+		for _, o := range result.OrderHistory {
+			locationIDs[o.LocationID] = true
+		}
+		for _, t := range result.Transactions {
+			locationIDs[t.LocationID] = true
+		}
+		s.esi.PrefetchStationNames(locationIDs)
+
+		// Enrich active orders
+		for i := range result.Orders {
+			if t, ok := sdeData.Types[result.Orders[i].TypeID]; ok {
+				result.Orders[i].TypeName = t.Name
+			}
+			result.Orders[i].LocationName = s.esi.StationName(result.Orders[i].LocationID)
+		}
+
+		// Enrich order history
+		for i := range result.OrderHistory {
+			if t, ok := sdeData.Types[result.OrderHistory[i].TypeID]; ok {
+				result.OrderHistory[i].TypeName = t.Name
+			}
+			result.OrderHistory[i].LocationName = s.esi.StationName(result.OrderHistory[i].LocationID)
+		}
+
+		// Enrich transactions
+		for i := range result.Transactions {
+			if t, ok := sdeData.Types[result.Transactions[i].TypeID]; ok {
+				result.Transactions[i].TypeName = t.Name
+			}
+			result.Transactions[i].LocationName = s.esi.StationName(result.Transactions[i].LocationID)
+		}
+	}
+
 	writeJSON(w, result)
+}
+
+// --- Industry Handlers ---
+
+func (s *Server) handleIndustryAnalyze(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TypeID             int32   `json:"type_id"`
+		Runs               int32   `json:"runs"`
+		MaterialEfficiency int32   `json:"me"`
+		TimeEfficiency     int32   `json:"te"`
+		SystemName         string  `json:"system_name"`
+		FacilityTax        float64 `json:"facility_tax"`
+		StructureBonus     float64 `json:"structure_bonus"`
+		MaxDepth           int     `json:"max_depth"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 400, "invalid json")
+		return
+	}
+
+	if !s.isReady() {
+		writeError(w, 503, "SDE not loaded yet")
+		return
+	}
+
+	if req.TypeID == 0 {
+		writeError(w, 400, "type_id is required")
+		return
+	}
+
+	// Resolve system ID
+	var systemID int32
+	if req.SystemName != "" {
+		s.mu.RLock()
+		systemID = s.sdeData.SystemByName[strings.ToLower(req.SystemName)]
+		s.mu.RUnlock()
+	}
+
+	params := engine.IndustryParams{
+		TypeID:             req.TypeID,
+		Runs:               req.Runs,
+		MaterialEfficiency: req.MaterialEfficiency,
+		TimeEfficiency:     req.TimeEfficiency,
+		SystemID:           systemID,
+		FacilityTax:        req.FacilityTax,
+		StructureBonus:     req.StructureBonus,
+		MaxDepth:           req.MaxDepth,
+	}
+
+	// Use NDJSON streaming for progress
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-cache")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, 500, "streaming not supported")
+		return
+	}
+
+	s.mu.RLock()
+	analyzer := s.industryAnalyzer
+	s.mu.RUnlock()
+
+	log.Printf("[API] IndustryAnalyze: typeID=%d, runs=%d, ME=%d, TE=%d, system=%s",
+		req.TypeID, req.Runs, req.MaterialEfficiency, req.TimeEfficiency, req.SystemName)
+
+	startTime := time.Now()
+
+	result, err := analyzer.Analyze(params, func(msg string) {
+		line, _ := json.Marshal(map[string]string{"type": "progress", "message": msg})
+		fmt.Fprintf(w, "%s\n", line)
+		flusher.Flush()
+	})
+
+	if err != nil {
+		log.Printf("[API] IndustryAnalyze error: %v", err)
+		line, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
+		fmt.Fprintf(w, "%s\n", line)
+		flusher.Flush()
+		return
+	}
+
+	durationMs := time.Since(startTime).Milliseconds()
+	log.Printf("[API] IndustryAnalyze complete in %dms", durationMs)
+
+	line, _ := json.Marshal(map[string]interface{}{"type": "result", "data": result})
+	fmt.Fprintf(w, "%s\n", line)
+	flusher.Flush()
+}
+
+func (s *Server) handleIndustrySearch(w http.ResponseWriter, r *http.Request) {
+	if !s.isReady() {
+		writeError(w, 503, "SDE not loaded yet")
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	s.mu.RLock()
+	analyzer := s.industryAnalyzer
+	s.mu.RUnlock()
+
+	if analyzer == nil {
+		log.Printf("[API] IndustrySearch: analyzer is nil!")
+		writeJSON(w, []struct{}{})
+		return
+	}
+
+	results := analyzer.SearchBuildableItems(query, limit)
+	log.Printf("[API] IndustrySearch: query=%q, found %d results", query, len(results))
+	writeJSON(w, results)
+}
+
+func (s *Server) handleIndustrySystems(w http.ResponseWriter, r *http.Request) {
+	if !s.isReady() {
+		writeError(w, 503, "SDE not loaded yet")
+		return
+	}
+
+	// Return list of systems with cost indices
+	systems, err := s.esi.FetchIndustrySystems()
+	if err != nil {
+		writeError(w, 500, "failed to fetch industry systems: "+err.Error())
+		return
+	}
+
+	// Enrich with system names
+	s.mu.RLock()
+	sdeData := s.sdeData
+	s.mu.RUnlock()
+
+	type SystemWithName struct {
+		SolarSystemID   int32   `json:"solar_system_id"`
+		SolarSystemName string  `json:"solar_system_name"`
+		Manufacturing   float64 `json:"manufacturing"`
+		Reaction        float64 `json:"reaction"`
+		Copying         float64 `json:"copying"`
+		Invention       float64 `json:"invention"`
+	}
+
+	result := make([]SystemWithName, 0, len(systems))
+	for _, sys := range systems {
+		name := ""
+		if s, ok := sdeData.Systems[sys.SolarSystemID]; ok {
+			name = s.Name
+		}
+
+		swn := SystemWithName{
+			SolarSystemID:   sys.SolarSystemID,
+			SolarSystemName: name,
+		}
+
+		for _, ci := range sys.CostIndices {
+			switch ci.Activity {
+			case "manufacturing":
+				swn.Manufacturing = ci.CostIndex
+			case "reaction":
+				swn.Reaction = ci.CostIndex
+			case "copying":
+				swn.Copying = ci.CostIndex
+			case "invention":
+				swn.Invention = ci.CostIndex
+			}
+		}
+
+		result = append(result, swn)
+	}
+
+	writeJSON(w, result)
+}
+
+func (s *Server) handleIndustryStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.isReady() {
+		writeError(w, 503, "SDE not loaded yet")
+		return
+	}
+
+	s.mu.RLock()
+	sdeData := s.sdeData
+	s.mu.RUnlock()
+
+	blueprintCount := 0
+	productCount := 0
+	if sdeData.Industry != nil {
+		blueprintCount = len(sdeData.Industry.Blueprints)
+		productCount = len(sdeData.Industry.ProductToBlueprint)
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"blueprints_loaded":   blueprintCount,
+		"products_with_bp":    productCount,
+		"total_types":         len(sdeData.Types),
+		"industry_data_ready": sdeData.Industry != nil,
+	})
 }

@@ -9,12 +9,12 @@ type FlipResult struct {
 	BuyStation      string
 	BuySystemName   string
 	BuySystemID     int32
-	BuyLocationID   int64  `json:"-"`
+	BuyLocationID   int64 `json:"-"`
 	SellPrice       float64
 	SellStation     string
 	SellSystemName  string
 	SellSystemID    int32
-	SellLocationID  int64  `json:"-"`
+	SellLocationID  int64 `json:"-"`
 	ProfitPerUnit   float64
 	MarginPercent   float64
 	UnitsToBuy      int32
@@ -51,9 +51,9 @@ type ContractResult struct {
 type RouteHop struct {
 	SystemName     string
 	StationName    string
-	SystemID       int32  `json:"-"`
-	LocationID     int64  `json:"-"`
-	DestSystemID   int32  `json:"-"`
+	SystemID       int32 `json:"-"`
+	LocationID     int64 `json:"-"`
+	DestSystemID   int32 `json:"-"`
 	DestSystemName string
 	TypeName       string
 	TypeID         int32
@@ -97,4 +97,10 @@ type ScanParams struct {
 	MaxInvestment  float64 // 0 = no filter (max ISK per position)
 	SecurityFilter string  // "" = all, "highsec", "lowsec", "nullsec"
 	MaxResults     int     // 0 = use default (100)
+
+	// --- Contract-specific filters ---
+	MinContractPrice  float64 // Minimum contract price in ISK (0 = use default 10M)
+	MaxContractMargin float64 // Maximum margin % to filter scams (0 = use default 100%)
+	MinPricedRatio    float64 // Minimum fraction of items that must have market price (0 = use default 0.8)
+	RequireHistory    bool    // If true, skip items without market history
 }

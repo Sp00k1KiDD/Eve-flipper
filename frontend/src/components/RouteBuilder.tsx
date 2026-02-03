@@ -2,6 +2,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { findRoutes } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { RouteResult, ScanParams } from "@/lib/types";
+import {
+  TabSettingsPanel,
+  SettingsField,
+  SettingsNumberInput,
+  SettingsGrid,
+} from "./TabSettingsPanel";
 
 type SortKey = "hops" | "profit" | "jumps" | "ppj";
 type SortDir = "asc" | "desc";
@@ -84,62 +90,56 @@ export function RouteBuilder({ params }: Props) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Controls */}
-      <div className="flex items-center gap-4 px-3 py-2 border-b border-eve-border">
-        <div className="flex items-center gap-2">
-          <label className="text-[10px] uppercase tracking-wider text-eve-dim">{t("routeMinHops")}</label>
-          <input
-            type="number"
-            value={minHops}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === "") { setMinHops(""); return; }
-              const v = parseInt(raw);
-              if (!isNaN(v) && v >= 1 && v <= 10) setMinHops(v);
-            }}
-            onBlur={() => { if (minHops === "") setMinHops(2); }}
-            min={1}
-            max={10}
-            className="w-14 px-2 py-1 bg-eve-input border border-eve-border rounded-sm text-eve-text text-xs font-mono
-                       focus:outline-none focus:border-eve-accent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-[10px] uppercase tracking-wider text-eve-dim">{t("routeMaxHops")}</label>
-          <input
-            type="number"
-            value={maxHops}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === "") { setMaxHops(""); return; }
-              const v = parseInt(raw);
-              if (!isNaN(v) && v >= 1 && v <= 10) setMaxHops(v);
-            }}
-            onBlur={() => { if (maxHops === "") setMaxHops(5); }}
-            min={minHops || 1}
-            max={10}
-            className="w-14 px-2 py-1 bg-eve-input border border-eve-border rounded-sm text-eve-text text-xs font-mono
-                       focus:outline-none focus:border-eve-accent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
-        </div>
-        <button
-          onClick={handleSearch}
-          disabled={!params.system_name}
-          className={`px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all
-            ${scanning
-              ? "bg-eve-error/80 text-white hover:bg-eve-error"
-              : "bg-eve-accent text-eve-dark hover:bg-eve-accent-hover shadow-eve-glow"
-            }
-            disabled:bg-eve-input disabled:text-eve-dim disabled:cursor-not-allowed disabled:shadow-none`}
+      {/* Settings Panel - unified design */}
+      <div className="shrink-0 m-2">
+        <TabSettingsPanel
+          title={t("routeSettings")}
+          hint={t("routeSettingsHint")}
+          icon="🗺"
+          defaultExpanded={true}
         >
-          {scanning ? t("stop") : t("routeFind")}
-        </button>
-        <span className="text-[10px] text-eve-dim">{progress}</span>
-        {results.length > 0 && (
-          <span className="text-[10px] text-eve-dim ml-auto">
-            {t("routeFound", { count: results.length })}
-          </span>
-        )}
+          <div className="flex items-center gap-4 flex-wrap">
+            <SettingsGrid cols={2}>
+              <SettingsField label={t("routeMinHops")}>
+                <SettingsNumberInput
+                  value={typeof minHops === "number" ? minHops : 2}
+                  onChange={(v) => setMinHops(v)}
+                  min={1}
+                  max={10}
+                />
+              </SettingsField>
+              <SettingsField label={t("routeMaxHops")}>
+                <SettingsNumberInput
+                  value={typeof maxHops === "number" ? maxHops : 5}
+                  onChange={(v) => setMaxHops(v)}
+                  min={typeof minHops === "number" ? minHops : 1}
+                  max={10}
+                />
+              </SettingsField>
+            </SettingsGrid>
+
+            <div className="flex items-center gap-3 ml-auto">
+              <button
+                onClick={handleSearch}
+                disabled={!params.system_name}
+                className={`px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all
+                  ${scanning
+                    ? "bg-eve-error/80 text-white hover:bg-eve-error"
+                    : "bg-eve-accent text-eve-dark hover:bg-eve-accent-hover shadow-eve-glow"
+                  }
+                  disabled:bg-eve-input disabled:text-eve-dim disabled:cursor-not-allowed disabled:shadow-none`}
+              >
+                {scanning ? t("stop") : t("routeFind")}
+              </button>
+              {progress && <span className="text-[10px] text-eve-dim">{progress}</span>}
+            </div>
+          </div>
+          {results.length > 0 && (
+            <div className="mt-2 text-xs text-eve-dim">
+              {t("routeFound", { count: results.length })}
+            </div>
+          )}
+        </TabSettingsPanel>
       </div>
 
       {/* Results table */}

@@ -14,8 +14,8 @@ export function ParametersPanel({ params, onChange }: Props) {
   };
 
   return (
-    <div className="bg-eve-panel border border-eve-border rounded-sm p-4">
-      <div className="grid grid-cols-4 gap-x-4 gap-y-3 items-end">
+    <div className="bg-eve-panel border border-eve-border rounded-sm p-3 sm:p-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-3 gap-y-3 items-end">
         <Field label={t("system")}>
           <SystemAutocomplete
             value={params.system_name}

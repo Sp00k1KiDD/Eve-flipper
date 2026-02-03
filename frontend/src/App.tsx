@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { StatusBar } from "./components/StatusBar";
 import { ParametersPanel } from "./components/ParametersPanel";
+import { ContractParametersPanel } from "./components/ContractParametersPanel";
 import { ScanResultsTable } from "./components/ScanResultsTable";
 import { ContractResultsTable } from "./components/ContractResultsTable";
 import { RouteBuilder } from "./components/RouteBuilder";
 import { WatchlistTab } from "./components/WatchlistTab";
 import { StationTrading } from "./components/StationTrading";
+import { IndustryTab } from "./components/IndustryTab";
+import { ScanHistory } from "./components/ScanHistory";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
-import { ToastContainer, useToast } from "./components/Toast";
+import { useGlobalToast } from "./components/Toast";
+import { Modal } from "./components/Modal";
+import { CharacterPopup } from "./components/CharacterPopup";
 import { getConfig, updateConfig, scan, scanMultiRegion, scanContracts, getWatchlist, getAuthStatus, logout as apiLogout, getLoginUrl } from "./lib/api";
 import { useI18n } from "./lib/i18n";
 import type { AuthStatus, ContractResult, FlipResult, ScanParams } from "./lib/types";
 
-type Tab = "radius" | "region" | "contracts" | "station" | "route" | "watchlist";
+type Tab = "radius" | "region" | "contracts" | "station" | "route" | "industry";
 
 function App() {
   const { t } = useI18n();
@@ -37,9 +43,72 @@ function App() {
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState("");
 
+  const [showWatchlist, setShowWatchlist] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showCharacter, setShowCharacter] = useState(false);
+
   const abortRef = useRef<AbortController | null>(null);
   const scanTabRef = useRef<Tab>(tab);
-  const { toasts, addToast } = useToast();
+  const { addToast } = useGlobalToast();
+
+  // Keyboard shortcuts
+  const shortcuts = useMemo(() => [
+    {
+      key: "s",
+      modifiers: ["ctrl"] as const,
+      handler: () => {
+        if (tab !== "route" && tab !== "station" && params.system_name) {
+          // Trigger scan via button click simulation
+          document.querySelector<HTMLButtonElement>('[data-scan-button]')?.click();
+        }
+      },
+      description: "Start/Stop scan",
+    },
+    {
+      key: "1",
+      modifiers: ["alt"] as const,
+      handler: () => setTab("radius"),
+      description: "Switch to Radius tab",
+    },
+    {
+      key: "2",
+      modifiers: ["alt"] as const,
+      handler: () => setTab("region"),
+      description: "Switch to Region tab",
+    },
+    {
+      key: "3",
+      modifiers: ["alt"] as const,
+      handler: () => setTab("contracts"),
+      description: "Switch to Contracts tab",
+    },
+    {
+      key: "4",
+      modifiers: ["alt"] as const,
+      handler: () => setTab("station"),
+      description: "Switch to Station tab",
+    },
+    {
+      key: "5",
+      modifiers: ["alt"] as const,
+      handler: () => setTab("route"),
+      description: "Switch to Route tab",
+    },
+    {
+      key: "w",
+      modifiers: ["alt"] as const,
+      handler: () => setShowWatchlist(true),
+      description: "Open Watchlist",
+    },
+    {
+      key: "h",
+      modifiers: ["alt"] as const,
+      handler: () => setShowHistory(true),
+      description: "Open History",
+    },
+  ], [tab, params.system_name]);
+
+  useKeyboardShortcuts(shortcuts);
 
   // Load config on mount
   useEffect(() => {
@@ -105,7 +174,7 @@ function App() {
             if (item.alert_min_margin > 0) {
               const match = results.find((r) => r.TypeID === item.type_id && r.MarginPercent > item.alert_min_margin);
               if (match) {
-                addToast(`🔔 ${match.TypeName}: ${t("alertTriggered", { margin: match.MarginPercent.toFixed(1), threshold: item.alert_min_margin.toFixed(0) })}`);
+                addToast(`${match.TypeName}: ${t("alertTriggered", { margin: match.MarginPercent.toFixed(1), threshold: item.alert_min_margin.toFixed(0) })}`, "success");
               }
             }
           }
@@ -118,32 +187,61 @@ function App() {
     } finally {
       setScanning(false);
     }
-  }, [scanning, tab, params, t]);
+  }, [scanning, tab, params, t, addToast]);
 
   return (
-    <div className="h-screen flex flex-col gap-3 p-4 select-none overflow-hidden">
-      <ToastContainer toasts={toasts} />
+    <div className="h-screen flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 select-none overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-eve-accent tracking-wide uppercase">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h1 className="text-base sm:text-lg font-semibold text-eve-accent tracking-wide uppercase">
           {t("appTitle")}
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+          {/* Watchlist button */}
+          <button
+            onClick={() => setShowWatchlist(true)}
+            className="flex items-center gap-1.5 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
+            title={t("tabWatchlist")}
+            aria-label={t("tabWatchlist")}
+          >
+            <span aria-hidden="true">⭐</span>
+            <span className="hidden sm:inline">{t("tabWatchlist")}</span>
+          </button>
+          {/* History button */}
+          <button
+            onClick={() => setShowHistory(true)}
+            className="flex items-center gap-1.5 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
+            title={t("tabHistory")}
+            aria-label={t("tabHistory")}
+          >
+            <span aria-hidden="true">📋</span>
+            <span className="hidden sm:inline">{t("tabHistory")}</span>
+          </button>
           {/* Auth chip — same style as StatusBar */}
-          <div className="flex items-center gap-2 h-[34px] px-4 bg-eve-panel border border-eve-border rounded-sm text-xs">
+          <div className="flex items-center gap-1 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs">
             {authStatus.logged_in ? (
               <>
-                <img
-                  src={`https://images.evetech.net/characters/${authStatus.character_id}/portrait?size=32`}
-                  alt=""
-                  className="w-5 h-5 rounded-sm"
-                />
-                <span className="text-eve-accent font-medium">{authStatus.character_name}</span>
+                <button
+                  onClick={() => setShowCharacter(true)}
+                  className="flex items-center gap-2 hover:bg-eve-dark/50 rounded-sm px-1 py-0.5 transition-colors"
+                  title={t("charViewInfo")}
+                >
+                  <img
+                    src={`https://images.evetech.net/characters/${authStatus.character_id}/portrait?size=32`}
+                    alt=""
+                    className="w-5 h-5 rounded-sm"
+                  />
+                  <span className="text-eve-accent font-medium">{authStatus.character_name}</span>
+                </button>
                 <button
                   onClick={handleLogout}
-                  className="text-eve-dim hover:text-eve-error transition-colors text-[10px] ml-0.5"
+                  className="ml-1 p-1 text-eve-dim hover:text-eve-error hover:bg-eve-dark/50 rounded-sm transition-colors"
+                  title={t("logout")}
+                  aria-label={t("logout")}
                 >
-                  ✕
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                  </svg>
                 </button>
               </>
             ) : (
@@ -157,12 +255,16 @@ function App() {
         </div>
       </div>
 
-      {/* Parameters */}
-      <ParametersPanel params={params} onChange={setParams} />
+      {/* Parameters - shown for tabs that use global scan params */}
+      {(tab === "radius" || tab === "region" || tab === "contracts") && (
+        <ParametersPanel params={params} onChange={setParams} />
+      )}
+
+      {/* Industry doesn't use global params - has its own settings panel */}
 
       {/* Tabs */}
       <div className="flex-1 flex flex-col min-h-0 bg-eve-panel border border-eve-border rounded-sm">
-        <div className="flex items-center border-b border-eve-border">
+        <div className="flex items-center border-b border-eve-border overflow-x-auto scrollbar-thin" role="tablist" aria-label="Scan modes">
           <TabButton
             active={tab === "radius"}
             onClick={() => setTab("radius")}
@@ -189,15 +291,17 @@ function App() {
             label={t("tabRoute")}
           />
           <TabButton
-            active={tab === "watchlist"}
-            onClick={() => setTab("watchlist")}
-            label={`⭐ ${t("tabWatchlist")}`}
+            active={tab === "industry"}
+            onClick={() => setTab("industry")}
+            label={t("tabIndustry")}
           />
-          <div className="flex-1" />
-          {tab !== "route" && tab !== "watchlist" && tab !== "station" && <button
+          <div className="flex-1 min-w-[20px]" />
+          {tab !== "route" && tab !== "station" && tab !== "industry" && <button
+            data-scan-button
             onClick={handleScan}
             disabled={!params.system_name}
-            className={`mr-3 px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all
+            title="Ctrl+S"
+            className={`mr-2 sm:mr-3 px-3 sm:px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all shrink-0
               ${
                 scanning
                   ? "bg-eve-error/80 text-white hover:bg-eve-error"
@@ -218,6 +322,10 @@ function App() {
             <ScanResultsTable results={regionResults} scanning={scanning && tab === "region"} progress={tab === "region" ? progress : ""} />
           </div>
           <div className={`flex-1 min-h-0 flex flex-col ${tab === "contracts" ? "" : "hidden"}`}>
+            {/* Contract-specific settings */}
+            <div className="shrink-0 mb-2">
+              <ContractParametersPanel params={params} onChange={setParams} />
+            </div>
             <ContractResultsTable results={contractResults} scanning={scanning && tab === "contracts"} progress={tab === "contracts" ? progress : ""} />
           </div>
           <div className={`flex-1 min-h-0 flex flex-col ${tab === "station" ? "" : "hidden"}`}>
@@ -226,11 +334,61 @@ function App() {
           <div className={`flex-1 min-h-0 flex flex-col ${tab === "route" ? "" : "hidden"}`}>
             <RouteBuilder params={params} />
           </div>
-          <div className={`flex-1 min-h-0 flex flex-col ${tab === "watchlist" ? "" : "hidden"}`}>
-            <WatchlistTab latestResults={[...radiusResults, ...regionResults]} />
+          <div className={`flex-1 min-h-0 flex flex-col ${tab === "industry" ? "" : "hidden"}`}>
+            <IndustryTab />
           </div>
         </div>
       </div>
+
+      {/* Watchlist Modal */}
+      <Modal
+        open={showWatchlist}
+        onClose={() => setShowWatchlist(false)}
+        title={t("tabWatchlist")}
+        width="max-w-3xl"
+      >
+        <WatchlistTab latestResults={[...radiusResults, ...regionResults]} />
+      </Modal>
+
+      {/* History Modal */}
+      <Modal
+        open={showHistory}
+        onClose={() => setShowHistory(false)}
+        title={t("tabHistory")}
+        width="max-w-6xl"
+      >
+        <ScanHistory
+          onLoadResults={(resultTab, results, loadedParams) => {
+            // Load historical results into appropriate tab
+            if (resultTab === "radius") {
+              setRadiusResults(results as FlipResult[]);
+              setTab("radius");
+            } else if (resultTab === "region") {
+              setRegionResults(results as FlipResult[]);
+              setTab("region");
+            } else if (resultTab === "contracts") {
+              setContractResults(results as ContractResult[]);
+              setTab("contracts");
+            }
+            // Optionally restore params
+            if (loadedParams && Object.keys(loadedParams).length > 0) {
+              setParams((p) => ({ ...p, ...loadedParams as Partial<ScanParams> }));
+            }
+            // Close modal after loading
+            setShowHistory(false);
+          }}
+        />
+      </Modal>
+
+      {/* Character Info Modal */}
+      {authStatus.logged_in && (
+        <CharacterPopup
+          open={showCharacter}
+          onClose={() => setShowCharacter(false)}
+          characterId={authStatus.character_id!}
+          characterName={authStatus.character_name!}
+        />
+      )}
     </div>
   );
 }
@@ -246,6 +404,8 @@ function TabButton({
 }) {
   return (
     <button
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-colors relative
         ${
@@ -256,7 +416,7 @@ function TabButton({
     >
       {label}
       {active && (
-        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-eve-accent" />
+        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-eve-accent" aria-hidden="true" />
       )}
     </button>
   );

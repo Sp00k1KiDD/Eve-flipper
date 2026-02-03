@@ -1,0 +1,84 @@
+import { useI18n } from "@/lib/i18n";
+import type { ScanParams } from "@/lib/types";
+import {
+  TabSettingsPanel,
+  SettingsField,
+  SettingsNumberInput,
+  SettingsCheckbox,
+  SettingsGrid,
+  SettingsHints,
+} from "./TabSettingsPanel";
+
+interface Props {
+  params: ScanParams;
+  onChange: (params: ScanParams) => void;
+}
+
+export function ContractParametersPanel({ params, onChange }: Props) {
+  const { t, locale } = useI18n();
+
+  const set = <K extends keyof ScanParams>(key: K, value: ScanParams[K]) => {
+    onChange({ ...params, [key]: value });
+  };
+
+  const hints = locale === "ru" ? [
+    `**${t("minContractPrice")}**: фильтрует контракты с ценой ниже порога (защита от bait контрактов)`,
+    `**${t("maxContractMargin")}**: контракты с маржой выше этого значения скорее всего скам`,
+    `**${t("minPricedRatio")}**: минимальный % предметов, которые должны иметь рыночную цену`,
+    `**${t("requireHistory")}**: требовать историю торговли для более точной оценки (медленнее)`,
+  ] : [
+    `**${t("minContractPrice")}**: filter contracts below this price (bait protection)`,
+    `**${t("maxContractMargin")}**: contracts above this margin are likely scams`,
+    `**${t("minPricedRatio")}**: minimum % of items that must have market price`,
+    `**${t("requireHistory")}**: require trading history for accurate pricing (slower)`,
+  ];
+
+  return (
+    <TabSettingsPanel
+      title={t("contractFilters")}
+      hint={t("contractFiltersHint")}
+      icon="📜"
+    >
+      <SettingsGrid cols={4}>
+        <SettingsField label={t("minContractPrice")}>
+          <SettingsNumberInput
+            value={params.min_contract_price ?? 10_000_000}
+            onChange={(v) => set("min_contract_price", v)}
+            min={0}
+            max={10_000_000_000}
+            step={1_000_000}
+          />
+        </SettingsField>
+
+        <SettingsField label={t("maxContractMargin")}>
+          <SettingsNumberInput
+            value={params.max_contract_margin ?? 100}
+            onChange={(v) => set("max_contract_margin", v)}
+            min={10}
+            max={500}
+            step={10}
+          />
+        </SettingsField>
+
+        <SettingsField label={t("minPricedRatio")}>
+          <SettingsNumberInput
+            value={(params.min_priced_ratio ?? 0.8) * 100}
+            onChange={(v) => set("min_priced_ratio", v / 100)}
+            min={50}
+            max={100}
+            step={5}
+          />
+        </SettingsField>
+
+        <SettingsField label={t("requireHistory")}>
+          <SettingsCheckbox
+            checked={params.require_history ?? false}
+            onChange={(v) => set("require_history", v)}
+          />
+        </SettingsField>
+      </SettingsGrid>
+
+      <SettingsHints hints={hints} />
+    </TabSettingsPanel>
+  );
+}

@@ -1,69 +1,58 @@
-import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, ContractResult, FlipResult, NdjsonContractMessage, NdjsonMessage, NdjsonRouteMessage, NdjsonStationMessage, RouteResult, ScanParams, ScanRecord, StationInfo, StationTrade, WatchlistItem } from "./types";
+import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, ContractResult, FlipResult, RouteResult, ScanParams, ScanRecord, StationInfo, StationTrade, WatchlistItem } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:13370";
 
-export async function getStatus(): Promise<AppStatus> {
-  const res = await fetch(`${BASE}/api/status`);
+// Helper to handle HTTP errors consistently
+async function handleResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let errorMessage = `HTTP ${res.status}`;
+    try {
+      const err = await res.json();
+      errorMessage = err.error || err.message || errorMessage;
+    } catch {
+      // Response body is not JSON
+    }
+    throw new Error(errorMessage);
+  }
   return res.json();
 }
 
-export async function getConfig(): Promise<AppConfig> {
-  const res = await fetch(`${BASE}/api/config`);
-  return res.json();
-}
+// Generic NDJSON message type
+type NdjsonGenericMessage<T> =
+  | { type: "progress"; message: string }
+  | { type: "result"; data: T[]; count?: number }
+  | { type: "error"; message: string };
 
-export async function updateConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
-  const res = await fetch(`${BASE}/api/config`, {
+// Generic NDJSON streaming helper to eliminate code duplication
+async function streamNdjson<T>(
+  url: string,
+  body: object,
+  onProgress: (msg: string) => void,
+  signal?: AbortSignal,
+  errorMessage = "Request failed"
+): Promise<T[]> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  return res.json();
-}
-
-export async function autocomplete(query: string): Promise<string[]> {
-  const res = await fetch(`${BASE}/api/systems/autocomplete?q=${encodeURIComponent(query)}`);
-  const data = await res.json();
-  return data.systems ?? [];
-}
-
-export async function scan(
-  params: ScanParams,
-  onProgress: (msg: string) => void,
-  signal?: AbortSignal
-): Promise<FlipResult[]> {
-  return streamScan(`${BASE}/api/scan`, params, onProgress, signal);
-}
-
-export async function scanMultiRegion(
-  params: ScanParams,
-  onProgress: (msg: string) => void,
-  signal?: AbortSignal
-): Promise<FlipResult[]> {
-  return streamScan(`${BASE}/api/scan/multi-region`, params, onProgress, signal);
-}
-
-export async function scanContracts(
-  params: ScanParams,
-  onProgress: (msg: string) => void,
-  signal?: AbortSignal
-): Promise<ContractResult[]> {
-  const res = await fetch(`${BASE}/api/scan/contracts`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    body: JSON.stringify(body),
     signal,
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error ?? "Contract scan failed");
+    let errMsg = errorMessage;
+    try {
+      const err = await res.json();
+      errMsg = err.error || err.message || errMsg;
+    } catch {
+      // Response body is not JSON
+    }
+    throw new Error(errMsg);
   }
 
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let results: ContractResult[] = [];
+  let results: T[] = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -75,7 +64,7 @@ export async function scanContracts(
 
     for (const line of lines) {
       if (!line.trim()) continue;
-      const msg: NdjsonContractMessage = JSON.parse(line);
+      const msg = JSON.parse(line) as NdjsonGenericMessage<T>;
       if (msg.type === "progress") {
         onProgress(msg.message);
       } else if (msg.type === "result") {
@@ -86,13 +75,63 @@ export async function scanContracts(
     }
   }
 
+  // Handle remaining buffer
   if (buffer.trim()) {
-    const msg: NdjsonContractMessage = JSON.parse(buffer);
+    const msg = JSON.parse(buffer) as NdjsonGenericMessage<T>;
     if (msg.type === "result") results = msg.data ?? [];
     else if (msg.type === "error") throw new Error(msg.message);
   }
 
   return results;
+}
+
+export async function getStatus(): Promise<AppStatus> {
+  const res = await fetch(`${BASE}/api/status`);
+  return handleResponse<AppStatus>(res);
+}
+
+export async function getConfig(): Promise<AppConfig> {
+  const res = await fetch(`${BASE}/api/config`);
+  return handleResponse<AppConfig>(res);
+}
+
+export async function updateConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
+  const res = await fetch(`${BASE}/api/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handleResponse<AppConfig>(res);
+}
+
+export async function autocomplete(query: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/systems/autocomplete?q=${encodeURIComponent(query)}`);
+  const data = await handleResponse<{ systems?: string[] }>(res);
+  return data.systems ?? [];
+}
+
+export async function scan(
+  params: ScanParams,
+  onProgress: (msg: string) => void,
+  signal?: AbortSignal
+): Promise<FlipResult[]> {
+  return streamNdjson<FlipResult>(`${BASE}/api/scan`, params, onProgress, signal, "Scan failed");
+}
+
+export async function scanMultiRegion(
+  params: ScanParams,
+  onProgress: (msg: string) => void,
+  signal?: AbortSignal
+): Promise<FlipResult[]> {
+  return streamNdjson<FlipResult>(`${BASE}/api/scan/multi-region`, params, onProgress, signal, "Multi-region scan failed");
+}
+
+export async function scanContracts(
+  params: ScanParams,
+  onProgress: (msg: string) => void,
+  signal?: AbortSignal
+): Promise<ContractResult[]> {
+  return streamNdjson<ContractResult>(`${BASE}/api/scan/contracts`, params, onProgress, signal, "Contract scan failed");
 }
 
 export async function findRoutes(
@@ -102,10 +141,9 @@ export async function findRoutes(
   onProgress: (msg: string) => void,
   signal?: AbortSignal
 ): Promise<RouteResult[]> {
-  const res = await fetch(`${BASE}/api/route/find`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  return streamNdjson<RouteResult>(
+    `${BASE}/api/route/find`,
+    {
       system_name: params.system_name,
       cargo_capacity: params.cargo_capacity,
       min_margin: params.min_margin,
@@ -113,55 +151,18 @@ export async function findRoutes(
       min_hops: minHops,
       max_hops: maxHops,
       max_results: params.max_results,
-    }),
+    },
+    onProgress,
     signal,
-  });
-
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error ?? "Route search failed");
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let results: RouteResult[] = [];
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const msg: NdjsonRouteMessage = JSON.parse(line);
-      if (msg.type === "progress") {
-        onProgress(msg.message);
-      } else if (msg.type === "result") {
-        results = msg.data ?? [];
-      } else if (msg.type === "error") {
-        throw new Error(msg.message);
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    const msg: NdjsonRouteMessage = JSON.parse(buffer);
-    if (msg.type === "result") results = msg.data ?? [];
-    else if (msg.type === "error") throw new Error(msg.message);
-  }
-
-  return results;
+    "Route search failed"
+  );
 }
 
 // --- Watchlist ---
 
 export async function getWatchlist(): Promise<WatchlistItem[]> {
   const res = await fetch(`${BASE}/api/watchlist`);
-  return res.json();
+  return handleResponse<WatchlistItem[]>(res);
 }
 
 export async function addToWatchlist(typeId: number, typeName: string, alertMinMargin: number = 0): Promise<WatchlistItem[]> {
@@ -170,12 +171,12 @@ export async function addToWatchlist(typeId: number, typeName: string, alertMinM
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type_id: typeId, type_name: typeName, alert_min_margin: alertMinMargin }),
   });
-  return res.json();
+  return handleResponse<WatchlistItem[]>(res);
 }
 
 export async function removeFromWatchlist(typeId: number): Promise<WatchlistItem[]> {
   const res = await fetch(`${BASE}/api/watchlist/${typeId}`, { method: "DELETE" });
-  return res.json();
+  return handleResponse<WatchlistItem[]>(res);
 }
 
 export async function updateWatchlistItem(typeId: number, alertMinMargin: number): Promise<WatchlistItem[]> {
@@ -184,14 +185,14 @@ export async function updateWatchlistItem(typeId: number, alertMinMargin: number
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ alert_min_margin: alertMinMargin }),
   });
-  return res.json();
+  return handleResponse<WatchlistItem[]>(res);
 }
 
 // --- Station Trading ---
 
 export async function getStations(systemName: string): Promise<StationInfo[]> {
   const res = await fetch(`${BASE}/api/stations?system=${encodeURIComponent(systemName)}`);
-  return res.json();
+  return handleResponse<StationInfo[]>(res);
 }
 
 export async function scanStation(
@@ -221,111 +222,40 @@ export async function scanStation(
   onProgress: (msg: string) => void,
   signal?: AbortSignal
 ): Promise<StationTrade[]> {
-  const res = await fetch(`${BASE}/api/scan/station`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-    signal,
-  });
-
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error ?? "Station scan failed");
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let results: StationTrade[] = [];
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const msg: NdjsonStationMessage = JSON.parse(line);
-      if (msg.type === "progress") {
-        onProgress(msg.message);
-      } else if (msg.type === "result") {
-        results = msg.data ?? [];
-      } else if (msg.type === "error") {
-        throw new Error(msg.message);
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    const msg: NdjsonStationMessage = JSON.parse(buffer);
-    if (msg.type === "result") results = msg.data ?? [];
-    else if (msg.type === "error") throw new Error(msg.message);
-  }
-
-  return results;
+  return streamNdjson<StationTrade>(`${BASE}/api/scan/station`, params, onProgress, signal, "Station scan failed");
 }
 
 // --- Scan History ---
 
-export async function getScanHistory(): Promise<ScanRecord[]> {
-  const res = await fetch(`${BASE}/api/scan/history`);
-  return res.json();
+export async function getScanHistory(limit: number = 50): Promise<ScanRecord[]> {
+  const res = await fetch(`${BASE}/api/scan/history?limit=${limit}`);
+  return handleResponse<ScanRecord[]>(res);
 }
 
-async function streamScan(
-  url: string,
-  params: ScanParams,
-  onProgress: (msg: string) => void,
-  signal?: AbortSignal
-): Promise<FlipResult[]> {
-  const res = await fetch(url, {
+export async function getScanHistoryById(id: number): Promise<ScanRecord> {
+  const res = await fetch(`${BASE}/api/scan/history/${id}`);
+  return handleResponse<ScanRecord>(res);
+}
+
+export async function getScanHistoryResults(id: number): Promise<{ scan: ScanRecord; results: unknown[] }> {
+  const res = await fetch(`${BASE}/api/scan/history/${id}/results`);
+  return handleResponse<{ scan: ScanRecord; results: unknown[] }>(res);
+}
+
+export async function deleteScanHistory(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/api/scan/history/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error("Delete failed");
+  }
+}
+
+export async function clearScanHistory(olderThanDays: number = 7): Promise<{ deleted: number }> {
+  const res = await fetch(`${BASE}/api/scan/history/clear`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-    signal,
+    body: JSON.stringify({ older_than_days: olderThanDays }),
   });
-
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error ?? "Scan failed");
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let results: FlipResult[] = [];
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      const msg: NdjsonMessage = JSON.parse(line);
-      if (msg.type === "progress") {
-        onProgress(msg.message);
-      } else if (msg.type === "result") {
-        results = msg.data ?? [];
-      } else if (msg.type === "error") {
-        throw new Error(msg.message);
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    const msg: NdjsonMessage = JSON.parse(buffer);
-    if (msg.type === "result") results = msg.data ?? [];
-    else if (msg.type === "error") throw new Error(msg.message);
-  }
-
-  return results;
+  return handleResponse<{ deleted: number }>(res);
 }
 
 // --- Auth ---
@@ -336,15 +266,94 @@ export function getLoginUrl(): string {
 
 export async function getAuthStatus(): Promise<AuthStatus> {
   const res = await fetch(`${BASE}/api/auth/status`);
-  return res.json();
+  return handleResponse<AuthStatus>(res);
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${BASE}/api/auth/logout`, { method: "POST" });
+  const res = await fetch(`${BASE}/api/auth/logout`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error("Logout failed");
+  }
 }
 
 export async function getCharacterInfo(): Promise<CharacterInfo> {
   const res = await fetch(`${BASE}/api/auth/character`);
-  if (!res.ok) throw new Error("Not logged in");
-  return res.json();
+  return handleResponse<CharacterInfo>(res);
+}
+
+// --- Industry ---
+
+import type { IndustryParams, IndustryAnalysis, BuildableItem, IndustrySystem, NdjsonIndustryMessage } from "./types";
+
+export async function analyzeIndustry(
+  params: IndustryParams,
+  onProgress: (msg: string) => void,
+  signal?: AbortSignal
+): Promise<IndustryAnalysis> {
+  const res = await fetch(`${BASE}/api/industry/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+    signal,
+  });
+
+  if (!res.ok) {
+    let errMsg = "Analysis failed";
+    try {
+      const err = await res.json();
+      errMsg = err.error || err.message || errMsg;
+    } catch {
+      // Response body is not JSON
+    }
+    throw new Error(errMsg);
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: IndustryAnalysis | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const msg = JSON.parse(line) as NdjsonIndustryMessage;
+      if (msg.type === "progress") {
+        onProgress(msg.message);
+      } else if (msg.type === "result") {
+        result = msg.data;
+      } else if (msg.type === "error") {
+        throw new Error(msg.message);
+      }
+    }
+  }
+
+  // Handle remaining buffer
+  if (buffer.trim()) {
+    const msg = JSON.parse(buffer) as NdjsonIndustryMessage;
+    if (msg.type === "result") result = msg.data;
+    else if (msg.type === "error") throw new Error(msg.message);
+  }
+
+  if (!result) {
+    throw new Error("No result received");
+  }
+
+  return result;
+}
+
+export async function searchBuildableItems(query: string, limit = 20): Promise<BuildableItem[]> {
+  const res = await fetch(`${BASE}/api/industry/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  return handleResponse<BuildableItem[]>(res);
+}
+
+export async function getIndustrySystems(): Promise<IndustrySystem[]> {
+  const res = await fetch(`${BASE}/api/industry/systems`);
+  return handleResponse<IndustrySystem[]>(res);
 }

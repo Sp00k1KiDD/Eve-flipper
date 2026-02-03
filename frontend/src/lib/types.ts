@@ -86,6 +86,9 @@ export interface ScanRecord {
   system: string;
   count: number;
   top_profit: number;
+  total_profit: number;
+  duration_ms: number;
+  params: Record<string, unknown>;
 }
 
 export interface StationTrade {
@@ -149,6 +152,11 @@ export interface ScanParams {
   min_daily_volume?: number;
   max_investment?: number;
   max_results?: number;
+  // Contract-specific filters
+  min_contract_price?: number;
+  max_contract_margin?: number;
+  min_priced_ratio?: number;
+  require_history?: boolean;
 }
 
 export interface AppConfig {
@@ -188,6 +196,8 @@ export interface CharacterInfo {
   character_name: string;
   wallet: number;
   orders: CharacterOrder[];
+  order_history: HistoricalOrder[];
+  transactions: WalletTransaction[];
   skills: SkillSheet | null;
 }
 
@@ -200,9 +210,120 @@ export interface CharacterOrder {
   volume_remain: number;
   volume_total: number;
   is_buy_order: boolean;
+  duration: number;
+  issued: string;
+  type_name?: string;
+  location_name?: string;
+}
+
+export interface HistoricalOrder {
+  order_id: number;
+  type_id: number;
+  location_id: number;
+  region_id: number;
+  price: number;
+  volume_remain: number;
+  volume_total: number;
+  is_buy_order: boolean;
+  state: "cancelled" | "expired" | "fulfilled";
+  issued: string;
+  type_name?: string;
+  location_name?: string;
+}
+
+export interface WalletTransaction {
+  transaction_id: number;
+  date: string;
+  type_id: number;
+  location_id: number;
+  unit_price: number;
+  quantity: number;
+  is_buy: boolean;
+  type_name?: string;
+  location_name?: string;
 }
 
 export interface SkillSheet {
   skills: { skill_id: number; active_skill_level: number }[];
   total_sp: number;
+}
+
+// --- Industry Types ---
+
+export interface IndustryParams {
+  type_id: number;
+  runs: number;
+  me: number; // Material Efficiency 0-10
+  te: number; // Time Efficiency 0-20
+  system_name: string;
+  facility_tax: number;
+  structure_bonus: number;
+  max_depth?: number;
+}
+
+export interface BlueprintInfo {
+  blueprint_type_id: number;
+  product_quantity: number;
+  me: number;
+  te: number;
+  time: number;
+}
+
+export interface MaterialNode {
+  type_id: number;
+  type_name: string;
+  quantity: number;
+  is_base: boolean;
+  buy_price: number;
+  build_cost: number;
+  should_build: boolean;
+  job_cost: number;
+  children: MaterialNode[] | null;
+  blueprint: BlueprintInfo | null;
+  depth: number;
+}
+
+export interface FlatMaterial {
+  type_id: number;
+  type_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  volume: number;
+}
+
+export interface IndustryAnalysis {
+  target_type_id: number;
+  target_type_name: string;
+  runs: number;
+  total_quantity: number;
+  market_buy_price: number;
+  total_build_cost: number;
+  optimal_build_cost: number;
+  savings: number;
+  savings_percent: number;
+  total_job_cost: number;
+  material_tree: MaterialNode;
+  flat_materials: FlatMaterial[];
+  system_cost_index: number;
+}
+
+export type NdjsonIndustryMessage =
+  | { type: "progress"; message: string }
+  | { type: "result"; data: IndustryAnalysis }
+  | { type: "error"; message: string };
+
+export interface BuildableItem {
+  type_id: number;
+  type_name: string;
+  has_blueprint: boolean;
+}
+
+export interface IndustrySystem {
+  solar_system_id: number;
+  solar_system_name: string;
+  manufacturing: number;
+  reaction: number;
+  copying: number;
+  invention: number;
 }
