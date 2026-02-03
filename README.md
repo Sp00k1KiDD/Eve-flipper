@@ -23,12 +23,22 @@ Ships as a **single executable** &mdash; frontend is embedded into the Go binary
 
 ## Features
 
+### Trading Tools
+- **Station Trading Pro** &mdash; EVE Guru-style same-station trading with advanced metrics (CTS, VWAP, PVI, OBDS, SDS, Period ROI, B v S Ratio, Days of Supply)
 - **Radius Scan** &mdash; find buy-low / sell-high flips within a configurable jump radius
 - **Region Scan** &mdash; cross-region arbitrage across entire regions
 - **Contract Scanner** &mdash; evaluate public item-exchange contracts vs market value, with scam detection
 - **Route Builder** &mdash; multi-hop trade routes via beam search (configurable hops, profit-per-jump ranking)
 - **Watchlist** &mdash; track favorite items with custom margin alerts
-- **Persistent Storage** &mdash; SQLite (WAL mode) for config, watchlist, scan history, and station cache
+
+### Advanced Features
+- **Scam Detection** &mdash; automatic risk scoring based on price deviation, volume mismatch, order dominance
+- **EVE SSO Login** &mdash; OAuth2 integration for character orders, wallet, and skills
+- **Risk Filters** &mdash; configurable Period ROI, B v S Ratio, PVI (volatility), SDS (scam score) thresholds
+- **Composite Trading Score (CTS)** &mdash; weighted ranking combining profitability, liquidity, and risk metrics
+
+### Technical
+- **Persistent Storage** &mdash; SQLite (WAL mode) for config, watchlist, scan history, market cache
 - **Live Progress** &mdash; NDJSON streaming for real-time scan feedback
 - **Multi-language UI** &mdash; English / Russian
 - **Single Binary** &mdash; frontend embedded via `go:embed`, one file to run everything
@@ -62,8 +72,13 @@ Ships as a **single executable** &mdash; frontend is embedded into the Go binary
 
 ## Screenshots
 
+### Station Trading Pro
+![Station Trading](assets/screenshot-station.png)
+
+### Radius Scan
 ![Radius Scan](assets/screenshot-radius.png)
 
+### Route Builder
 ![Route Builder](assets/screenshot-routes.png)
 
 ## Download
@@ -211,6 +226,34 @@ Eve-flipper/
 | `PUT` | `/api/watchlist/{typeID}` | Update alert threshold |
 | `DELETE` | `/api/watchlist/{typeID}` | Remove from watchlist |
 | `GET` | `/api/scan/history` | Recent scan history |
+| `POST` | `/api/scan/station` | Station trading scan (NDJSON stream) |
+| `GET` | `/api/stations?system=` | List stations in a system |
+| `GET` | `/api/auth/login` | Redirect to EVE SSO |
+| `GET` | `/api/auth/callback` | OAuth2 callback handler |
+| `GET` | `/api/auth/status` | Current login status |
+| `POST` | `/api/auth/logout` | Clear session |
+| `GET` | `/api/auth/character` | Character info (orders, wallet, skills) |
+
+## Station Trading Metrics
+
+EVE Flipper calculates EVE Guru-style metrics for station trading:
+
+| Metric | Description |
+|--------|-------------|
+| **CTS** | Composite Trading Score (0-100) — weighted ranking combining all metrics |
+| **Period ROI** | Historical profitability over 90 days |
+| **B v S Ratio** | Buy vs Sell ratio — demand/supply balance |
+| **D.O.S.** | Days of Supply — how long current stock will last |
+| **VWAP** | Volume-Weighted Average Price (30 days) |
+| **PVI** | Price Volatility Index — price stability measure |
+| **OBDS** | Order Book Depth Score — liquidity within ±5% of best price |
+| **SDS** | Scam Detection Score (0-100) — risk indicator |
+
+### Scam Detection (SDS)
+
+The scanner automatically flags suspicious orders:
+- 🚨 **High Risk** (SDS ≥ 50): Best buy < 50% VWAP, single order dominance, no recent trades
+- ⚠️ **Extreme Price**: Current price deviates >50% from historical average
 
 ## Testing
 
