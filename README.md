@@ -22,6 +22,7 @@
 
 [📥 Download](https://github.com/ilyaux/Eve-flipper/releases) · 
 [📚 Documentation](https://github.com/ilyaux/Eve-flipper/wiki) · 
+[💬 Discord](https://discord.gg/EVHjew5N) · 
 [🐛 Report Bug](https://github.com/ilyaux/Eve-flipper/issues)
 
 <br/>
@@ -168,6 +169,16 @@ Open **http://127.0.0.1:13370** in your browser 🎉
 
 ---
 
+## 💬 Community
+
+Join the **EVE Flipper** Discord for questions, tips, and feedback:
+
+[![Discord](https://img.shields.io/badge/Discord-EVE%20Flipper-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EVHjew5N)
+
+**[→ Join server](https://discord.gg/EVHjew5N)**
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
@@ -224,7 +235,8 @@ EVE Online and all related trademarks are property of CCP hf.
 <a href="https://github.com/ilyaux/Eve-flipper/stargazers">Stars</a> · 
 <a href="https://github.com/ilyaux/Eve-flipper/network/members">Forks</a> · 
 <a href="https://github.com/ilyaux/Eve-flipper/issues">Issues</a> · 
-<a href="https://github.com/ilyaux/Eve-flipper/releases">Releases</a>
+<a href="https://github.com/ilyaux/Eve-flipper/releases">Releases</a> · 
+<a href="https://discord.gg/EVHjew5N">Discord</a>
 </sub>
 
 </div>
