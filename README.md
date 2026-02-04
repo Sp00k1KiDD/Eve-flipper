@@ -22,7 +22,7 @@
 
 [📥 Download](https://github.com/ilyaux/Eve-flipper/releases) · 
 [📚 Documentation](https://github.com/ilyaux/Eve-flipper/wiki) · 
-[💬 Discord](https://discord.gg/EVHjew5N) · 
+[💬 Discord](https://discord.gg/Z9pXSGcJZE) · 
 [🐛 Report Bug](https://github.com/ilyaux/Eve-flipper/issues)
 
 <br/>
