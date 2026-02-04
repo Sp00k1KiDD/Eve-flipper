@@ -136,13 +136,21 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 
 	esiOK := s.esi.HealthCheck()
+	_, lastOK := s.esi.HealthStatus()
 
-	writeJSON(w, map[string]interface{}{
+	result := map[string]interface{}{
 		"sde_loaded":  sdeLoaded,
 		"sde_systems": systemCount,
 		"sde_types":   typeCount,
 		"esi_ok":      esiOK,
-	})
+	}
+
+	// Add last successful ESI connection time if available
+	if !lastOK.IsZero() {
+		result["esi_last_ok"] = lastOK.Unix()
+	}
+
+	writeJSON(w, result)
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {

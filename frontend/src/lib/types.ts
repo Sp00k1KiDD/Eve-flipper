@@ -178,6 +178,7 @@ export interface AppStatus {
   sde_systems: number;
   sde_types: number;
   esi_ok: boolean;
+  esi_last_ok?: number; // Unix timestamp of last successful ESI check
 }
 
 export type NdjsonMessage =

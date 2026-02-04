@@ -25,6 +25,12 @@ type Client struct {
 	mu           sync.Mutex
 	stationCache sync.Map     // int64 -> string (L1 in-memory)
 	stationStore StationStore // L2 persistent cache (SQLite)
+	
+	// Health check cache
+	healthMu       sync.RWMutex
+	healthOK       bool
+	healthChecked  time.Time
+	healthLastOK   time.Time
 }
 
 // NewClient creates an ESI client with rate limiting and the given station cache store.
@@ -38,18 +44,53 @@ func NewClient(store StationStore) *Client {
 }
 
 // HealthCheck pings ESI to verify connectivity.
+// Results are cached for 10 seconds to avoid spamming ESI.
 func (c *Client) HealthCheck() bool {
+	c.healthMu.RLock()
+	if time.Since(c.healthChecked) < 10*time.Second {
+		ok := c.healthOK
+		c.healthMu.RUnlock()
+		return ok
+	}
+	c.healthMu.RUnlock()
+
+	// Perform actual check
+	c.healthMu.Lock()
+	defer c.healthMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if time.Since(c.healthChecked) < 10*time.Second {
+		return c.healthOK
+	}
+
 	req, err := http.NewRequest("GET", baseURL+"/status/?datasource=tranquility", nil)
 	if err != nil {
+		c.healthOK = false
+		c.healthChecked = time.Now()
 		return false
 	}
 	req.Header.Set("User-Agent", "eve-flipper/1.0 (github.com)")
 	resp, err := c.http.Do(req)
 	if err != nil {
+		c.healthOK = false
+		c.healthChecked = time.Now()
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode == 200
+
+	c.healthOK = resp.StatusCode == 200
+	c.healthChecked = time.Now()
+	if c.healthOK {
+		c.healthLastOK = time.Now()
+	}
+	return c.healthOK
+}
+
+// HealthStatus returns detailed health information.
+func (c *Client) HealthStatus() (ok bool, lastOK time.Time) {
+	c.healthMu.RLock()
+	defer c.healthMu.RUnlock()
+	return c.healthOK, c.healthLastOK
 }
 
 // StationName fetches and caches a station name by ID.
