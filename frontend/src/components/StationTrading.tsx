@@ -4,6 +4,7 @@ import { getStations, scanStation } from "@/lib/api";
 import { formatISK, formatMargin, formatNumber } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { MetricTooltip } from "./Tooltip";
+import { EmptyState } from "./EmptyState";
 import {
   TabSettingsPanel,
   SettingsField,
@@ -12,12 +13,16 @@ import {
   SettingsGrid,
   SettingsSelect,
 } from "./TabSettingsPanel";
+import { SystemAutocomplete } from "./SystemAutocomplete";
 
 type SortKey = keyof StationTrade;
 type SortDir = "asc" | "desc";
 
 interface Props {
   params: ScanParams;
+  /** Called when system (or other global param) is changed in this tab; updates global filter */
+  onChange?: (params: ScanParams) => void;
+  isLoggedIn?: boolean;
 }
 
 // Metric tooltip keys mapping
@@ -52,7 +57,7 @@ const columnDefs: { key: SortKey; labelKey: TranslationKey; width: string; numer
 // Sentinel value for "All stations"
 const ALL_STATIONS_ID = 0;
 
-export function StationTrading({ params }: Props) {
+export function StationTrading({ params, onChange, isLoggedIn = false }: Props) {
   const { t } = useI18n();
 
   const [stations, setStations] = useState<StationInfo[]>([]);
@@ -261,9 +266,18 @@ export function StationTrading({ params }: Props) {
           hint={t("stationSettingsHint")}
           icon="🏪"
           defaultExpanded={true}
+          help={{ stepKeys: ["helpStationStep1", "helpStationStep2", "helpStationStep3"], wikiSlug: "Station-Trading" }}
         >
-          {/* Station & Basic Settings */}
+          {/* System (from global filter or geolocation) & Station */}
           <SettingsGrid cols={5}>
+            <SettingsField label={t("system")}>
+              <SystemAutocomplete
+                value={params.system_name}
+                onChange={(v) => onChange?.({ ...params, system_name: v })}
+                showLocationButton={true}
+                isLoggedIn={isLoggedIn}
+              />
+            </SettingsField>
             <SettingsField label={t("stationSelect")}>
               {loadingStations ? (
                 <div className="h-[34px] flex items-center text-xs text-eve-dim">{t("loadingStations")}</div>
@@ -450,8 +464,8 @@ export function StationTrading({ params }: Props) {
             ))}
             {results.length === 0 && !scanning && (
               <tr>
-                <td colSpan={columnDefs.length + 1} className="px-3 py-8 text-center text-eve-dim">
-                  {t("stationPrompt")}
+                <td colSpan={columnDefs.length + 1} className="p-0">
+                  <EmptyState reason="no_scan_yet" wikiSlug="Station-Trading" />
                 </td>
               </tr>
             )}

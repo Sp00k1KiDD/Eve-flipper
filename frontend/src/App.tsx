@@ -16,6 +16,7 @@ import { Modal } from "./components/Modal";
 import { CharacterPopup } from "./components/CharacterPopup";
 import { getConfig, updateConfig, scan, scanMultiRegion, scanContracts, getWatchlist, getAuthStatus, logout as apiLogout, getLoginUrl, getStatus } from "./lib/api";
 import { useI18n } from "./lib/i18n";
+import { formatISK } from "./lib/format";
 import type { AuthStatus, ContractResult, FlipResult, ScanParams } from "./lib/types";
 
 type Tab = "radius" | "region" | "contracts" | "station" | "route" | "industry";
@@ -51,6 +52,16 @@ function App() {
   const abortRef = useRef<AbortController | null>(null);
   const scanTabRef = useRef<Tab>(tab);
   const { addToast } = useGlobalToast();
+
+  const [contractScanCompleted, setContractScanCompleted] = useState(false);
+  const contractFilterHints = useMemo(() => {
+    if (contractResults.length > 0 || !contractScanCompleted) return undefined;
+    return [
+      `${t("minContractPrice")}: ${formatISK(params.min_contract_price ?? 10_000_000)}`,
+      `${t("maxContractMargin")}: ${params.max_contract_margin ?? 100}%`,
+      `${t("minPricedRatio")}: ${((params.min_priced_ratio ?? 0.8) * 100).toFixed(0)}%`,
+    ];
+  }, [contractResults.length, contractScanCompleted, params.min_contract_price, params.max_contract_margin, params.min_priced_ratio, t]);
 
   // Keyboard shortcuts
   const shortcuts = useMemo(() => [
@@ -179,6 +190,7 @@ function App() {
       if (currentTab === "contracts") {
         const results = await scanContracts(params, setProgress, controller.signal);
         setContractResults(results);
+        setContractScanCompleted(true);
       } else {
         const scanFn = currentTab === "radius" ? scan : scanMultiRegion;
         const results = await scanFn(params, setProgress, controller.signal);
@@ -280,9 +292,9 @@ function App() {
         </div>
       </div>
 
-      {/* Parameters - shown for tabs that use global scan params */}
-      {(tab === "radius" || tab === "region" || tab === "contracts") && (
-        <ParametersPanel params={params} onChange={setParams} isLoggedIn={authStatus.logged_in} />
+      {/* Parameters - shown for tabs that use global scan params (Flipper, Regional, Contracts, Route) */}
+      {(tab === "radius" || tab === "region" || tab === "contracts" || tab === "route") && (
+        <ParametersPanel params={params} onChange={setParams} isLoggedIn={authStatus.logged_in} tab={tab} />
       )}
 
       {/* Industry doesn't use global params - has its own settings panel */}
@@ -306,14 +318,16 @@ function App() {
             label={t("tabContracts")}
           />
           <TabButton
-            active={tab === "station"}
-            onClick={() => setTab("station")}
-            label={t("tabStation")}
-          />
-          <TabButton
             active={tab === "route"}
             onClick={() => setTab("route")}
             label={t("tabRoute")}
+          />
+          {/* Visual separator: scan group vs station/industry */}
+          <div className="h-6 w-px bg-eve-border mx-1 flex-shrink-0" aria-hidden="true" />
+          <TabButton
+            active={tab === "station"}
+            onClick={() => setTab("station")}
+            label={t("tabStation")}
           />
           <TabButton
             active={tab === "industry"}
@@ -351,10 +365,10 @@ function App() {
             <div className="shrink-0 mb-2">
               <ContractParametersPanel params={params} onChange={setParams} />
             </div>
-            <ContractResultsTable results={contractResults} scanning={scanning && tab === "contracts"} progress={tab === "contracts" ? progress : ""} />
+            <ContractResultsTable results={contractResults} scanning={scanning && tab === "contracts"} progress={tab === "contracts" ? progress : ""} filterHints={contractFilterHints} />
           </div>
           <div className={`flex-1 min-h-0 flex flex-col ${tab === "station" ? "" : "hidden"}`}>
-            <StationTrading params={params} />
+            <StationTrading params={params} onChange={setParams} isLoggedIn={authStatus.logged_in} />
           </div>
           <div className={`flex-1 min-h-0 flex flex-col ${tab === "route" ? "" : "hidden"}`}>
             <RouteBuilder params={params} />
