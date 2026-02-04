@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"eve-flipper/internal/graph"
+	"eve-flipper/internal/logger"
 )
 
 const sdeURL = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip"
@@ -54,11 +55,11 @@ func Load(dataDir string) (*Data, error) {
 	extractDir := filepath.Join(dataDir, "sde")
 
 	if _, err := os.Stat(extractDir); os.IsNotExist(err) {
-		fmt.Println("Downloading SDE data...")
+		logger.Info("SDE", "Downloading data...")
 		if err := downloadFile(zipPath, sdeURL); err != nil {
 			return nil, fmt.Errorf("download SDE: %w", err)
 		}
-		fmt.Println("Extracting SDE data...")
+		logger.Info("SDE", "Extracting data...")
 		if err := extractZip(zipPath, extractDir); err != nil {
 			return nil, fmt.Errorf("extract SDE: %w", err)
 		}
@@ -72,19 +73,19 @@ func Load(dataDir string) (*Data, error) {
 		Universe:     graph.NewUniverse(),
 	}
 
-	fmt.Println("Loading solar systems...")
+	logger.Info("SDE", "Loading solar systems...")
 	if err := data.loadSystems(extractDir); err != nil {
 		return nil, err
 	}
-	fmt.Println("Loading item types...")
+	logger.Info("SDE", "Loading item types...")
 	if err := data.loadTypes(extractDir); err != nil {
 		return nil, err
 	}
-	fmt.Println("Loading stations...")
+	logger.Info("SDE", "Loading stations...")
 	if err := data.loadStations(extractDir); err != nil {
 		return nil, err
 	}
-	fmt.Println("Loading stargates...")
+	logger.Info("SDE", "Loading stargates...")
 	if err := data.loadStargates(extractDir); err != nil {
 		return nil, err
 	}
@@ -99,15 +100,18 @@ func Load(dataDir string) (*Data, error) {
 	}
 
 	// Load industry data (blueprints, reprocessing)
-	fmt.Println("Loading industry data...")
+	logger.Info("SDE", "Loading industry data...")
 	industry, err := data.LoadIndustry(extractDir)
 	if err != nil {
 		return nil, fmt.Errorf("load industry: %w", err)
 	}
 	data.Industry = industry
 
-	fmt.Printf("SDE loaded: %d systems, %d types, %d stations, %d blueprints\n",
-		len(data.Systems), len(data.Types), len(data.Stations), len(data.Industry.Blueprints))
+	logger.Section("SDE Statistics")
+	logger.Stats("Systems", len(data.Systems))
+	logger.Stats("Item types", len(data.Types))
+	logger.Stats("Stations", len(data.Stations))
+	logger.Stats("Blueprints", len(data.Industry.Blueprints))
 	return data, nil
 }
 
@@ -222,7 +226,7 @@ func readJSONL(dir, baseName string, fn func(json.RawMessage) error) error {
 		return err
 	}
 	if filePath == "" {
-		fmt.Printf("Warning: SDE file %s.jsonl not found, skipping\n", baseName)
+		logger.Warn("SDE", fmt.Sprintf("File %s.jsonl not found, skipping", baseName))
 		return nil
 	}
 

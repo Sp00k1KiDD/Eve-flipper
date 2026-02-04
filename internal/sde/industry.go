@@ -3,6 +3,8 @@ package sde
 import (
 	"encoding/json"
 	"fmt"
+
+	"eve-flipper/internal/logger"
 )
 
 // Blueprint represents a manufacturing blueprint from the SDE.
@@ -76,18 +78,13 @@ func NewIndustryData() *IndustryData {
 func (d *Data) LoadIndustry(extractDir string) (*IndustryData, error) {
 	ind := NewIndustryData()
 
-	fmt.Println("Loading blueprints...")
 	if err := ind.loadBlueprints(extractDir); err != nil {
 		return nil, fmt.Errorf("load blueprints: %w", err)
 	}
 
-	fmt.Println("Loading reprocessing data...")
 	if err := ind.loadReprocessing(extractDir); err != nil {
 		return nil, fmt.Errorf("load reprocessing: %w", err)
 	}
-
-	fmt.Printf("Industry data loaded: %d blueprints, %d reprocessing entries\n",
-		len(ind.Blueprints), len(ind.Reprocessing))
 
 	return ind, nil
 }
@@ -108,12 +105,12 @@ func (ind *IndustryData) loadBlueprints(dir string) error {
 			return err
 		}
 		if count > 0 {
-			fmt.Printf("Loaded %d blueprint entries from %s.jsonl\n", count, name)
+			logger.Info("SDE", fmt.Sprintf("Loaded %d blueprints from %s.jsonl", count, name))
 			return nil
 		}
 	}
 	
-	fmt.Println("Warning: No blueprint files found in SDE")
+	logger.Warn("SDE", "No blueprint files found")
 	return nil
 }
 

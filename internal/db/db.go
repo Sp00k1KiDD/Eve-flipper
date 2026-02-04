@@ -3,10 +3,10 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
+	"eve-flipper/internal/logger"
 	_ "modernc.org/sqlite"
 )
 
@@ -40,7 +40,7 @@ func Open() (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("migrate db: %w", err)
 	}
-	log.Printf("[DB] Opened %s", path)
+	logger.Success("DB", fmt.Sprintf("Opened %s", path))
 	return d, nil
 }
 
@@ -135,7 +135,7 @@ func (d *DB) migrate() error {
 		if err != nil {
 			return fmt.Errorf("migration v1: %w", err)
 		}
-		log.Println("[DB] Applied migration v1")
+		logger.Info("DB", "Applied migration v1")
 	}
 
 	if version < 2 {
@@ -164,7 +164,7 @@ func (d *DB) migrate() error {
 		if err != nil {
 			return fmt.Errorf("migration v2: %w", err)
 		}
-		log.Println("[DB] Applied migration v2 (market history)")
+		logger.Info("DB", "Applied migration v2 (market history)")
 	}
 
 	if version < 3 {
@@ -183,7 +183,7 @@ func (d *DB) migrate() error {
 		if err != nil {
 			return fmt.Errorf("migration v3: %w", err)
 		}
-		log.Println("[DB] Applied migration v3 (auth session)")
+		logger.Info("DB", "Applied migration v3 (auth session)")
 	}
 
 	if version < 4 {
@@ -222,7 +222,7 @@ func (d *DB) migrate() error {
 		if err != nil {
 			return fmt.Errorf("migration v4: %w", err)
 		}
-		log.Println("[DB] Applied migration v4 (scan history params, station results)")
+		logger.Info("DB", "Applied migration v4 (scan history)")
 	}
 
 	return nil
