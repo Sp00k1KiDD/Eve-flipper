@@ -193,9 +193,14 @@ function App() {
     <div className="h-screen flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 select-none overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-base sm:text-lg font-semibold text-eve-accent tracking-wide uppercase">
-          {t("appTitle")}
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-base sm:text-lg font-semibold text-eve-accent tracking-wide uppercase">
+            {t("appTitle")}
+          </h1>
+          <span className="px-1.5 py-0.5 text-[10px] font-mono bg-eve-accent/10 text-eve-accent border border-eve-accent/30 rounded-sm">
+            {import.meta.env.VITE_APP_VERSION || "dev"}
+          </span>
+        </div>
         <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
           {/* Watchlist button */}
           <button
