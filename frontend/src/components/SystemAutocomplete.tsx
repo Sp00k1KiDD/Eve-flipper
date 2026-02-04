@@ -97,44 +97,41 @@ export function SystemAutocomplete({ value, onChange, showLocationButton = true,
 
   return (
     <div ref={containerRef} className="relative">
-      <div className={showButton ? "flex gap-1" : ""}>
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => handleInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onFocus={() => suggestions.length > 0 && setOpen(true)}
-          placeholder={t("systemPlaceholder")}
-          className={`${showButton ? "flex-1" : "w-full"} px-3 py-1.5 bg-eve-input border border-eve-border rounded-sm text-eve-text
-                     placeholder:text-eve-dim text-sm font-mono
-                     focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30
-                     transition-colors`}
-        />
-        {showButton && (
-          <button
-            type="button"
-            onClick={handleLocationClick}
-            disabled={locationLoading}
-            title={t("useCurrentLocation")}
-            className="px-2 py-1.5 bg-eve-panel border border-eve-border rounded-sm
-                       text-eve-dim hover:text-eve-accent hover:border-eve-accent
-                       disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-colors flex items-center justify-center"
-          >
-            {locationLoading ? (
-              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="32" strokeLinecap="round" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
-                <circle cx="12" cy="12" r="8" strokeDasharray="2 2" />
-              </svg>
-            )}
-          </button>
-        )}
-      </div>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => handleInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onFocus={() => suggestions.length > 0 && setOpen(true)}
+        placeholder={t("systemPlaceholder")}
+        className={`w-full px-3 py-1.5 bg-eve-input border border-eve-border rounded-sm text-eve-text
+                   placeholder:text-eve-dim text-sm font-mono
+                   focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30
+                   transition-colors ${showButton ? "pr-8" : ""}`}
+      />
+      {showButton && (
+        <button
+          type="button"
+          onClick={handleLocationClick}
+          disabled={locationLoading}
+          title={t("useCurrentLocation")}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1
+                     text-eve-dim hover:text-eve-accent
+                     disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors"
+        >
+          {locationLoading ? (
+            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="32" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
+            </svg>
+          )}
+        </button>
+      )}
       {open && suggestions.length > 0 && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-eve-panel border border-eve-border rounded-sm shadow-eve-glow max-h-48 overflow-y-auto">
           {suggestions.map((name, i) => (
