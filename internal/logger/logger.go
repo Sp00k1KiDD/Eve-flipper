@@ -14,7 +14,6 @@ const (
 	bold    = "\033[1m"
 	dim     = "\033[2m"
 	
-	black   = "\033[30m"
 	red     = "\033[31m"
 	green   = "\033[32m"
 	yellow  = "\033[33m"
@@ -22,28 +21,35 @@ const (
 	magenta = "\033[35m"
 	cyan    = "\033[36m"
 	white   = "\033[37m"
-	
-	bgBlack = "\033[40m"
-	bgRed   = "\033[41m"
-	bgGreen = "\033[42m"
-	bgBlue  = "\033[44m"
-	bgCyan  = "\033[46m"
 )
 
-var useColors = runtime.GOOS != "windows" || os.Getenv("TERM") != ""
+var useColors = false
 
 func init() {
-	// Enable colors on Windows 10+ by setting VT mode
-	if runtime.GOOS == "windows" {
-		useColors = enableVT()
+	// Check if colors are supported
+	// Windows Terminal, PowerShell 7+, VS Code terminal support colors
+	// Classic cmd.exe does NOT support ANSI by default
+	
+	if runtime.GOOS != "windows" {
+		// Unix-like systems generally support colors
+		useColors = true
+		return
 	}
-}
-
-// enableVT enables virtual terminal processing on Windows
-func enableVT() bool {
-	// Try to enable VT processing - if it works, colors are supported
-	// This is a simplified check; full implementation would use Windows API
-	return true
+	
+	// On Windows, check for modern terminal indicators
+	// WT_SESSION = Windows Terminal
+	// TERM_PROGRAM = VS Code, etc.
+	// ANSICON = ANSICON installed
+	if os.Getenv("WT_SESSION") != "" ||
+		os.Getenv("TERM_PROGRAM") != "" ||
+		os.Getenv("ANSICON") != "" ||
+		os.Getenv("ConEmuANSI") == "ON" {
+		useColors = true
+		return
+	}
+	
+	// Try to enable VT mode on Windows 10+
+	useColors = enableWindowsVT()
 }
 
 func colorize(color, text string) string {
