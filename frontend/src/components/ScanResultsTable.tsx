@@ -615,9 +615,9 @@ export function ScanResultsTable({ results, scanning, progress, scanCompletedWit
             className="fixed z-50 bg-eve-panel border border-eve-border rounded-sm shadow-eve-glow-strong py-1 min-w-[200px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            <ContextItem label={t("copyItem")} onClick={() => copyText(contextMenu.row.TypeName)} />
-            <ContextItem label={t("copyBuyStation")} onClick={() => copyText(contextMenu.row.BuyStation)} />
-            <ContextItem label={t("copySellStation")} onClick={() => copyText(contextMenu.row.SellStation)} />
+            <ContextItem label={t("copyItem")} onClick={() => copyText(contextMenu.row.TypeName ?? "")} />
+            <ContextItem label={t("copyBuyStation")} onClick={() => copyText(contextMenu.row.BuyStation ?? "")} />
+            <ContextItem label={t("copySellStation")} onClick={() => copyText(contextMenu.row.SellStation ?? "")} />
             <ContextItem
               label={t("copyTradeRoute")}
               onClick={() => copyText(`Buy: ${contextMenu.row.TypeName} x${contextMenu.row.UnitsToBuy} @ ${contextMenu.row.BuyStation} → Sell: @ ${contextMenu.row.SellStation}`)}
