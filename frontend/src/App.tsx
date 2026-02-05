@@ -49,6 +49,10 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [showCharacter, setShowCharacter] = useState(false);
   const [esiAvailable, setEsiAvailable] = useState<boolean | null>(null); // null = loading
+  const appVersion = import.meta.env.VITE_APP_VERSION || "dev";
+
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [hasUpdate, setHasUpdate] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const scanTabRef = useRef<Tab>(tab);
@@ -122,6 +126,34 @@ function App() {
   ], [tab, params.system_name]);
 
   useKeyboardShortcuts(shortcuts);
+
+  // Check for newer GitHub release (only for non-dev builds)
+  useEffect(() => {
+    if (!appVersion || appVersion === "dev") return;
+
+    const controller = new AbortController();
+    const fetchLatest = async () => {
+      try {
+        const res = await fetch("https://api.github.com/repos/ilyaux/Eve-flipper/releases/latest", {
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const data = await res.json() as { tag_name?: string };
+        if (!data.tag_name) return;
+        const latest = String(data.tag_name).replace(/^v/i, "");
+        const current = String(appVersion).replace(/^v/i, "");
+        setLatestVersion(latest);
+        if (isVersionNewer(latest, current)) {
+          setHasUpdate(true);
+        }
+      } catch {
+        // ignore network / API errors
+      }
+    };
+
+    fetchLatest();
+    return () => controller.abort();
+  }, [appVersion]);
 
   // Load config on mount
   useEffect(() => {
@@ -226,13 +258,64 @@ function App() {
     <div className="h-screen flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 select-none overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <h1 className="text-base sm:text-lg font-semibold text-eve-accent tracking-wide uppercase">
-            {t("appTitle")}
-          </h1>
-          <span className="px-1.5 py-0.5 text-[10px] font-mono bg-eve-accent/10 text-eve-accent border border-eve-accent/30 rounded-sm">
-            {import.meta.env.VITE_APP_VERSION || "dev"}
-          </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <h1 className="text-base sm:text-lg font-semibold text-eve-accent tracking-wide uppercase">
+              {t("appTitle")}
+            </h1>
+            <div className="flex items-center gap-1">
+              <span
+                className="px-1.5 py-0.5 text-[10px] font-mono bg-eve-accent/10 text-eve-accent border border-eve-accent/30 rounded-sm"
+                title={hasUpdate && latestVersion ? t("versionUpdateHint", { latest: latestVersion }) : ""}
+              >
+                {appVersion}
+              </span>
+              {hasUpdate && latestVersion && (
+                <a
+                  href="https://github.com/ilyaux/Eve-flipper/releases/latest"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-1.5 py-0.5 text-[9px] uppercase tracking-wide rounded-sm bg-eve-warning/10 text-eve-warning border border-eve-warning/40 hover:bg-eve-warning/20 transition-colors"
+                >
+                  {t("versionUpdateAvailable")}
+                </a>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-eve-dim">
+            <a
+              href="https://github.com/ilyaux/Eve-flipper"
+              target="_blank"
+              rel="noreferrer"
+              className="p-1 rounded-sm hover:bg-eve-panel hover:text-eve-accent transition-colors"
+              aria-label="GitHub"
+            >
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8" />
+              </svg>
+            </a>
+            <a
+              href="https://discord.gg/Z9pXSGcJZE"
+              target="_blank"
+              rel="noreferrer"
+              className="p-1 rounded-sm hover:bg-eve-panel hover:text-eve-accent transition-colors"
+              aria-label="Discord"
+            >
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M13.545 2.907a13.2 13.2 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.2 12.2 0 0 0-3.658 0 8 8 0 0 0-.412-.833.05.05 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.04.04 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032q.003.022.021.037a13.3 13.3 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019q.463-.63.818-1.329a.05.05 0 0 0-.01-.059l-.018-.011a9 9 0 0 1-1.248-.595.05.05 0 0 1-.02-.066l.015-.019q.127-.095.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.05.05 0 0 1 .053.007q.121.1.248.195a.05.05 0 0 1-.004.085 8 8 0 0 1-1.249.594.05.05 0 0 0-.03.03.05.05 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.2 13.2 0 0 0 4.001-2.02.05.05 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.03.03 0 0 0-.02-.019m-8.198 7.307c-.789 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612m5.316 0c-.788 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612" />
+              </svg>
+            </a>
+          </div>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
           {/* Watchlist button */}
@@ -498,3 +581,16 @@ function TabButton({
 }
 
 export default App;
+
+function isVersionNewer(latest: string, current: string): boolean {
+  const la = latest.split(".").map((n) => parseInt(n, 10) || 0);
+  const ca = current.split(".").map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(la.length, ca.length);
+  for (let i = 0; i < len; i++) {
+    const lv = la[i] ?? 0;
+    const cv = ca[i] ?? 0;
+    if (lv > cv) return true;
+    if (lv < cv) return false;
+  }
+  return false;
+}

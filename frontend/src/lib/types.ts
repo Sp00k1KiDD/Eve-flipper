@@ -262,6 +262,7 @@ export interface CharacterInfo {
   order_history: HistoricalOrder[];
   transactions: WalletTransaction[];
   skills: SkillSheet | null;
+  risk?: CharacterRiskSummary | null;
 }
 
 export interface CharacterOrder {
@@ -309,6 +310,20 @@ export interface WalletTransaction {
 export interface SkillSheet {
   skills: { skill_id: number; active_skill_level: number }[];
   total_sp: number;
+}
+
+export interface CharacterRiskSummary {
+  risk_score: number;
+  risk_level: "safe" | "balanced" | "high" | string;
+  var_95: number;
+  var_99: number;
+  es_95: number;
+  es_99: number;
+  typical_daily_pnl: number;
+  worst_day_loss: number;
+  sample_days: number;
+  window_days: number;
+  capacity_multiplier: number;
 }
 
 // --- Industry Types ---

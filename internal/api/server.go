@@ -1150,13 +1150,14 @@ func (s *Server) handleAuthCharacter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type charInfo struct {
-		CharacterID   int64                    `json:"character_id"`
-		CharacterName string                   `json:"character_name"`
-		Wallet        float64                  `json:"wallet"`
-		Orders        []esi.CharacterOrder     `json:"orders"`
-		OrderHistory  []esi.HistoricalOrder    `json:"order_history"`
-		Transactions  []esi.WalletTransaction  `json:"transactions"`
-		Skills        *esi.SkillSheet          `json:"skills"`
+		CharacterID   int64                        `json:"character_id"`
+		CharacterName string                       `json:"character_name"`
+		Wallet        float64                      `json:"wallet"`
+		Orders        []esi.CharacterOrder         `json:"orders"`
+		OrderHistory  []esi.HistoricalOrder        `json:"order_history"`
+		Transactions  []esi.WalletTransaction      `json:"transactions"`
+		Skills        *esi.SkillSheet              `json:"skills"`
+		Risk          *engine.PortfolioRiskSummary `json:"risk,omitempty"`
 	}
 
 	result := charInfo{
@@ -1240,6 +1241,13 @@ func (s *Server) handleAuthCharacter(w http.ResponseWriter, r *http.Request) {
 				result.Transactions[i].TypeName = t.Name
 			}
 			result.Transactions[i].LocationName = s.esi.StationName(result.Transactions[i].LocationID)
+		}
+	}
+
+	// Compute portfolio risk summary from recent wallet transactions.
+	if len(result.Transactions) > 0 {
+		if risk := engine.ComputePortfolioRiskFromTransactions(result.Transactions); risk != nil {
+			result.Risk = risk
 		}
 	}
 
