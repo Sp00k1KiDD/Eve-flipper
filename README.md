@@ -119,9 +119,17 @@ Grab the latest release for your platform:
 # Windows
 eve-flipper-windows-amd64.exe
 
-# Linux/macOS
-chmod +x eve-flipper-*
+# Linux
+chmod +x eve-flipper-linux-amd64
 ./eve-flipper-linux-amd64
+
+# macOS (Apple Silicon)
+chmod +x eve-flipper-darwin-arm64
+./eve-flipper-darwin-arm64
+
+# macOS (Intel)
+chmod +x eve-flipper-darwin-amd64
+./eve-flipper-darwin-amd64
 ```
 
 Open **http://127.0.0.1:13370** in your browser 🎉
