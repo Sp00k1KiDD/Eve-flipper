@@ -7,6 +7,7 @@ const translations = {
     // Header
     appTitle: "EVE Flipper",
     loginEve: "Войти через EVE",
+    loginWaiting: "Ожидание входа...",
 
     // Status
     sdeLoading: "SDE: загрузка...",
@@ -667,6 +668,7 @@ const translations = {
     // Header
     appTitle: "EVE Flipper",
     loginEve: "Login with EVE",
+    loginWaiting: "Waiting for login...",
 
     // Status
     sdeLoading: "SDE: loading...",

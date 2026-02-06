@@ -33,6 +33,7 @@ type Server struct {
 	mu               sync.RWMutex
 	ready            bool
 	ssoState         string // CSRF state for current login flow
+	ssoDesktop       bool   // true when login was initiated from the desktop (Tauri) app
 
 	// Wallet transaction cache for P&L tab (TTL 2 min).
 	txnCacheMu   sync.RWMutex
@@ -1121,8 +1122,10 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := auth.GenerateState()
+	desktop := r.URL.Query().Get("desktop") == "1"
 	s.mu.Lock()
 	s.ssoState = state
+	s.ssoDesktop = desktop
 	s.mu.Unlock()
 	http.Redirect(w, r, s.sso.BuildAuthURL(state), http.StatusTemporaryRedirect)
 }
@@ -1177,8 +1180,41 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[AUTH] Logged in as %s (ID: %d)", info.CharacterName, info.CharacterID)
 
-	// Redirect back to frontend
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	// Check whether the login was initiated from the desktop (Tauri) app.
+	s.mu.RLock()
+	desktop := s.ssoDesktop
+	s.mu.RUnlock()
+
+	if !desktop {
+		// Web browser: redirect back to the frontend (original behaviour).
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// Desktop / Tauri: show a styled success page in the system browser.
+	// The Tauri app detects login via polling /api/auth/status.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>EVE Flipper - Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{text-align:center;padding:3rem 4rem;border:1px solid #30363d;border-radius:12px;background:#161b22}
+.avatar{width:64px;height:64px;border-radius:8px;margin-bottom:1rem}
+h1{font-size:1.5rem;color:#58a6ff;margin-bottom:.5rem}
+p{color:#8b949e;margin-bottom:.25rem}
+.hint{margin-top:1.5rem;font-size:.85rem;color:#484f58}
+</style></head>
+<body><div class="card">
+<img class="avatar" src="https://images.evetech.net/characters/%d/portrait?size=128" alt="">
+<h1>%s</h1>
+<p>Login successful!</p>
+<p class="hint">You can close this tab and return to EVE Flipper.</p>
+</div>
+<script>setTimeout(function(){window.close()},4000)</script>
+</body></html>`, info.CharacterID, info.CharacterName)
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {

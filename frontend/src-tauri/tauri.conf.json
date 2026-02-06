@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nicegui/tauri/v2/tooling/cli/schema.json",
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/v2/crates/tauri-cli/schema.json",
   "productName": "EVE Flipper",
   "version": "2.0.0",
   "identifier": "com.eveflipper.tool",
@@ -17,7 +17,6 @@
         "height": 700,
         "minWidth": 900,
         "minHeight": 600,
-        "alwaysOnTop": true,
         "decorations": true,
         "resizable": true
       }
@@ -31,14 +30,6 @@
     "targets": "all",
     "icon": [
       "icons/icon.ico"
-    ],
-    "externalBin": [
-      "binaries/eve-flipper-backend"
     ]
-  },
-  "plugins": {
-    "shell": {
-      "sidecar": true
-    }
   }
 }

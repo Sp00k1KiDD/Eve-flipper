@@ -64,6 +64,7 @@ function App() {
   const [showWatchlist, setShowWatchlist] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showCharacter, setShowCharacter] = useState(false);
+  const [loginPolling, setLoginPolling] = useState(false);
   const [esiAvailable, setEsiAvailable] = useState<boolean | null>(null); // null = loading
   const appVersion = import.meta.env.VITE_APP_VERSION || "dev";
 
@@ -211,6 +212,49 @@ function App() {
   const handleLogout = useCallback(async () => {
     await apiLogout();
     setAuthStatus({ logged_in: false });
+  }, []);
+
+  // Open EVE SSO login in system browser (Tauri) or same window (web)
+  const handleLogin = useCallback(async () => {
+    const baseUrl = getLoginUrl();
+    // Detect Tauri runtime
+    const isTauri = !!(window as any).__TAURI_INTERNALS__;
+    if (isTauri) {
+      // Pass ?desktop=1 so the backend knows to show a "close tab" page
+      // instead of redirecting back to /
+      const url = baseUrl + "?desktop=1";
+      try {
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl(url);
+      } catch {
+        // Fallback if plugin fails
+        window.open(url, "_blank");
+      }
+    } else {
+      // In regular browser, navigate in same window.
+      // Backend will redirect back to / after auth completes.
+      window.location.href = baseUrl;
+      return;
+    }
+    // Start polling for auth completion (Tauri only)
+    setLoginPolling(true);
+    const poll = setInterval(async () => {
+      try {
+        const status = await getAuthStatus();
+        if (status.logged_in) {
+          clearInterval(poll);
+          setAuthStatus(status);
+          setLoginPolling(false);
+        }
+      } catch {
+        // ignore, keep polling
+      }
+    }, 2000);
+    // Stop polling after 5 minutes
+    setTimeout(() => {
+      clearInterval(poll);
+      setLoginPolling(false);
+    }, 5 * 60 * 1000);
   }, []);
 
   // Save config on param change (debounced)
@@ -388,9 +432,13 @@ function App() {
                 </button>
               </>
             ) : (
-              <a href={getLoginUrl()} className="text-eve-accent hover:text-eve-accent-hover transition-colors">
-                {t("loginEve")}
-              </a>
+              <button
+                onClick={handleLogin}
+                disabled={loginPolling}
+                className="text-eve-accent hover:text-eve-accent-hover transition-colors disabled:opacity-60"
+              >
+                {loginPolling ? t("loginWaiting") : t("loginEve")}
+              </button>
             )}
           </div>
           <LanguageSwitcher />
