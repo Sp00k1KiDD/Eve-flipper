@@ -10,8 +10,12 @@ interface TabSettingsPanelProps {
   help?: { stepKeys: string[]; wikiSlug: string };
   /** Optional extra content in the header row (e.g. preset picker) */
   headerExtra?: ReactNode;
+  /** If set, persist expanded/collapsed state to localStorage under this key */
+  persistKey?: string;
   children: ReactNode;
 }
+
+const STORAGE_PREFIX = "eve-settings-expanded:";
 
 /**
  * Unified collapsible settings panel for tab-specific parameters.
@@ -24,15 +28,32 @@ export function TabSettingsPanel({
   defaultExpanded = false,
   help,
   headerExtra,
+  persistKey,
   children,
 }: TabSettingsPanelProps) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [expanded, setExpanded] = useState(() => {
+    if (persistKey) {
+      const stored = localStorage.getItem(STORAGE_PREFIX + persistKey);
+      if (stored !== null) return stored === "1";
+    }
+    return defaultExpanded;
+  });
+
+  const toggle = () => {
+    setExpanded((prev) => {
+      const next = !prev;
+      if (persistKey) {
+        localStorage.setItem(STORAGE_PREFIX + persistKey, next ? "1" : "0");
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="bg-eve-panel border border-eve-border rounded-sm overflow-visible">
       <div className="flex items-center justify-between px-3 py-2">
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={toggle}
           className="flex items-center gap-2 text-left hover:bg-eve-accent/5 transition-colors rounded-sm px-1 -ml-1"
         >
           <span className="text-eve-accent text-sm">{icon}</span>

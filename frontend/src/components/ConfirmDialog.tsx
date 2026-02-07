@@ -87,7 +87,7 @@ export function ConfirmDialog({
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
     >
-      <div className="max-w-md w-full mx-4 bg-eve-dark border border-eve-border rounded-sm shadow-2xl">
+      <div className="max-w-md w-full mx-2 sm:mx-4 bg-eve-dark border border-eve-border rounded-sm shadow-2xl">
         {/* Header */}
         <div className="px-4 py-3 border-b border-eve-border bg-eve-panel">
           <h2 id="confirm-dialog-title" className="text-sm font-semibold uppercase tracking-wider text-eve-accent">

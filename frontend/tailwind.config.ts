@@ -1,5 +1,11 @@
 import type { Config } from "tailwindcss";
 
+/** Helper: creates a Tailwind color value from a CSS RGB-triplet variable
+ *  that supports opacity modifiers like bg-eve-accent/10 */
+function v(name: string) {
+  return `rgb(var(--eve-${name}) / <alpha-value>)`;
+}
+
 const config: Config = {
   darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -7,20 +13,21 @@ const config: Config = {
     extend: {
       colors: {
         eve: {
-          dark: "#0d0d0d",
-          panel: "#1a1a1a",
-          "panel-hover": "#222222",
-          input: "#232323",
-          accent: "#e69500",
-          "accent-hover": "#f0a500",
-          "accent-dim": "#b37400",
-          text: "#c0c0c0",
-          dim: "#8c8c8c",
-          success: "#00b450",
-          error: "#dc3c3c",
-          border: "#2a2a2a",
-          "border-light": "#3a3a3a",
-          glow: "rgba(230, 149, 0, 0.15)",
+          dark: v("dark"),
+          panel: v("panel"),
+          "panel-hover": v("panel-hover"),
+          input: v("input"),
+          accent: v("accent"),
+          "accent-hover": v("accent-hover"),
+          "accent-dim": v("accent-dim"),
+          text: v("text"),
+          dim: v("dim"),
+          success: v("success"),
+          error: v("error"),
+          warning: v("warning"),
+          border: v("border"),
+          "border-light": v("border-light"),
+          glow: "var(--eve-glow)",
         },
       },
       fontFamily: {
@@ -28,8 +35,8 @@ const config: Config = {
         mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "Consolas", "Monaco", "monospace"],
       },
       boxShadow: {
-        "eve-glow": "0 0 8px rgba(230, 149, 0, 0.15)",
-        "eve-glow-strong": "0 0 16px rgba(230, 149, 0, 0.3)",
+        "eve-glow": "0 0 8px var(--eve-glow)",
+        "eve-glow-strong": "0 0 16px var(--eve-glow)",
         "eve-inset": "inset 0 1px 3px rgba(0, 0, 0, 0.5)",
       },
     },

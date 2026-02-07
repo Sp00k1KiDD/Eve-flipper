@@ -230,7 +230,7 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
       </div>
 
       {/* Table */}
-      <div className="flex-1 min-h-0 overflow-auto border border-eve-border rounded-sm">
+      <div className="flex-1 min-h-0 overflow-auto border border-eve-border rounded-sm table-scroll-wrapper table-scroll-container">
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="bg-eve-dark border-b border-eve-border">
@@ -275,7 +275,7 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
                 key={rowKey(row)}
                 onContextMenu={(e) => handleContextMenu(e, row)}
                 className={`border-b border-eve-border/50 hover:bg-eve-accent/5 transition-colors ${
-                  i % 2 === 0 ? "bg-eve-panel" : "bg-[#161616]"
+                  i % 2 === 0 ? "bg-eve-panel" : "bg-eve-dark"
                 }`}
               >
                 {columnDefs.map((col) => (

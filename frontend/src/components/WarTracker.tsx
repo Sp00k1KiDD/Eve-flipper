@@ -367,7 +367,7 @@ function RegionDetailPopup({ region, onClose, onOpenArbitrage, formatISK }: Regi
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70" onClick={onClose}>
       <div 
-        className="bg-eve-panel border border-eve-border rounded-sm max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl"
+        className="bg-eve-panel border border-eve-border rounded-sm max-w-3xl w-full mx-2 sm:mx-0 max-h-[95vh] sm:max-h-[90vh] flex flex-col shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header - fixed at top */}

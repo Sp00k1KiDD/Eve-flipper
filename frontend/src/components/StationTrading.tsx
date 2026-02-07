@@ -345,7 +345,7 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   // Get row class with risk indicators
   const getRowClass = (row: StationTrade, index: number) => {
     let base = `border-b border-eve-border/50 hover:bg-eve-accent/5 transition-colors ${
-      index % 2 === 0 ? "bg-eve-panel" : "bg-[#161616]"
+      index % 2 === 0 ? "bg-eve-panel" : "bg-eve-dark"
     }`;
     if (row.IsHighRiskFlag) base += " border-l-2 border-l-eve-error";
     else if (row.IsExtremePriceFlag) base += " border-l-2 border-l-yellow-500";
@@ -384,6 +384,7 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
           hint={t("stationSettingsHint")}
           icon="🏪"
           defaultExpanded={true}
+          persistKey="station"
           help={{ stepKeys: ["helpStationStep1", "helpStationStep2", "helpStationStep3"], wikiSlug: "Station-Trading" }}
           headerExtra={
             <PresetPicker
@@ -544,7 +545,7 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
       </div>
 
       {/* Table */}
-      <div className="flex-1 min-h-0 overflow-auto border border-eve-border rounded-sm">
+      <div className="flex-1 min-h-0 overflow-auto border border-eve-border rounded-sm table-scroll-wrapper table-scroll-container">
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="bg-eve-dark border-b border-eve-border">

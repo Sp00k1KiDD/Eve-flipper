@@ -59,7 +59,7 @@ export function StatusBar() {
     ((status?.sde_systems ?? 0) > 0 && (status?.sde_types ?? 0) > 0);
 
   return (
-    <div className="flex items-center gap-4 h-[34px] px-4 bg-eve-panel border border-eve-border rounded-sm">
+    <div className="flex items-center gap-2 sm:gap-4 h-[34px] px-2 sm:px-4 bg-eve-panel border border-eve-border rounded-sm">
       <StatusDot
         ok={sdeOk}
         loading={status === null}

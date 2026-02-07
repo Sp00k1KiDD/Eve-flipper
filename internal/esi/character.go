@@ -245,3 +245,31 @@ func (c *Client) GetCharacterLocation(characterID int64, accessToken string) (*C
 	}
 	return &loc, nil
 }
+
+// CharacterRolesResponse represents the character's corporation roles.
+type CharacterRolesResponse struct {
+	Roles []string `json:"roles"`
+}
+
+// GetCharacterRoles fetches a character's corporation roles.
+// Requires esi-characters.read_corporation_roles.v1 scope.
+func (c *Client) GetCharacterRoles(characterID int64, accessToken string) (*CharacterRolesResponse, error) {
+	url := fmt.Sprintf("%s/characters/%d/roles/?datasource=tranquility", baseURL, characterID)
+	var roles CharacterRolesResponse
+	if err := c.AuthGetJSON(url, accessToken, &roles); err != nil {
+		return nil, fmt.Errorf("character roles: %w", err)
+	}
+	return &roles, nil
+}
+
+// GetCharacterCorporationID fetches which corporation a character belongs to.
+func (c *Client) GetCharacterCorporationID(characterID int64) (int32, error) {
+	url := fmt.Sprintf("%s/characters/%d/?datasource=tranquility", baseURL, characterID)
+	var info struct {
+		CorporationID int32 `json:"corporation_id"`
+	}
+	if err := c.GetJSON(url, &info); err != nil {
+		return 0, fmt.Errorf("character info: %w", err)
+	}
+	return info.CorporationID, nil
+}

@@ -161,6 +161,78 @@ func isRetryable(statusCode int) bool {
 	return statusCode == 502 || statusCode == 503 || statusCode == 504 || statusCode == 520
 }
 
+// PostJSON sends a POST request with a JSON body and decodes the response into dst.
+// Uses the lightweight semaphore and retries transient errors like GetJSON.
+func (c *Client) PostJSON(url string, body interface{}, dst interface{}) error {
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal POST body: %w", err)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			wait := retryBaseWait * time.Duration(1<<(attempt-1))
+			time.Sleep(wait)
+		}
+
+		c.sem <- struct{}{}
+
+		req, err := http.NewRequest("POST", url, nil)
+		if err != nil {
+			<-c.sem
+			return err
+		}
+		req.Body = io.NopCloser(&bytesReader{data: bodyBytes})
+		req.ContentLength = int64(len(bodyBytes))
+		req.Header.Set("User-Agent", "eve-flipper/1.0 (github.com)")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			<-c.sem
+			lastErr = err
+			log.Printf("[ESI] POST failed (attempt %d/%d): %v", attempt+1, maxRetries+1, err)
+			continue
+		}
+
+		if resp.StatusCode == 200 {
+			decErr := json.NewDecoder(resp.Body).Decode(dst)
+			resp.Body.Close()
+			<-c.sem
+			return decErr
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		<-c.sem
+		lastErr = fmt.Errorf("ESI POST %d: %s", resp.StatusCode, string(respBody))
+
+		if !isRetryable(resp.StatusCode) {
+			return lastErr
+		}
+		log.Printf("[ESI] POST retryable %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, maxRetries+1, url)
+	}
+
+	return lastErr
+}
+
+// bytesReader is a simple io.Reader over a byte slice (avoids importing bytes package).
+type bytesReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *bytesReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	return n, nil
+}
+
 // GetJSON fetches a URL and decodes JSON into dst.
 // Retries up to maxRetries times on transient ESI errors (502/503/504) with exponential backoff.
 // Semaphore is released before sleeping so other requests can proceed.

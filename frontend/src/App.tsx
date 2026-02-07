@@ -10,8 +10,11 @@ import { WatchlistTab } from "./components/WatchlistTab";
 import { StationTrading } from "./components/StationTrading";
 import { IndustryTab } from "./components/IndustryTab";
 import { WarTracker } from "./components/WarTracker";
+import { PlexTab } from "./components/PlexTab";
+// import { MarketMakingTab } from "./components/MarketMakingTab";
 import { ScanHistory } from "./components/ScanHistory";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
+import { ThemeSwitcher } from "./components/ThemeSwitcher";
 import { useGlobalToast } from "./components/Toast";
 import { Modal } from "./components/Modal";
 import { CharacterPopup } from "./components/CharacterPopup";
@@ -24,7 +27,7 @@ import { useEsiStatus } from "./lib/useEsiStatus";
 import type { ContractResult, FlipResult, RouteResult, ScanParams, StationTrade } from "./lib/types";
 import logo from "./assets/logo.svg";
 
-type Tab = "radius" | "region" | "contracts" | "station" | "route" | "industry" | "demand";
+type Tab = "radius" | "region" | "contracts" | "station" | "route" | "industry" | "demand" | "plex";
 
 function App() {
   const { t } = useI18n();
@@ -43,7 +46,7 @@ function App() {
   const [tab, setTabRaw] = useState<Tab>(() => {
     try {
       const saved = localStorage.getItem("eve-flipper-active-tab");
-      if (saved && ["radius", "region", "contracts", "station", "route", "industry", "demand"].includes(saved)) {
+      if (saved && ["radius", "region", "contracts", "station", "route", "industry", "demand", "plex"].includes(saved)) {
         return saved as Tab;
       }
     } catch { /* ignore */ }
@@ -216,21 +219,23 @@ function App() {
     }
   }, [scanning, tab, params, t, addToast]);
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   return (
-    <div className="h-screen flex flex-col gap-2 sm:gap-3 p-2 sm:p-4 select-none overflow-hidden">
+    <div className="h-screen flex flex-col gap-1.5 sm:gap-3 p-1.5 sm:p-4 select-none overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             <img
               src={logo}
               alt="EVE Flipper logo"
-              className="w-4 h-4 sm:w-4 sm:h-4"
+              className="w-4 h-4 shrink-0"
             />
-            <h1 className="text-base sm:text-lg font-semibold text-eve-accent tracking-wide uppercase">
+            <h1 className="text-sm sm:text-lg font-semibold text-eve-accent tracking-wide uppercase truncate">
               {t("appTitle")}
             </h1>
-            <div className="flex items-center gap-1">
+            <div className="hidden sm:flex items-center gap-1">
               <span
                 className="px-1.5 py-0.5 text-[10px] font-mono bg-eve-accent/10 text-eve-accent border border-eve-accent/30 rounded-sm"
                 title={hasUpdate && latestVersion ? t("versionUpdateHint", { latest: latestVersion }) : ""}
@@ -249,7 +254,7 @@ function App() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1.5 text-eve-dim">
+          <div className="hidden sm:flex items-center gap-1.5 text-eve-dim">
             <a
               href="https://github.com/ilyaux/Eve-flipper"
               target="_blank"
@@ -257,12 +262,7 @@ function App() {
               className="p-1 rounded-sm hover:bg-eve-panel hover:text-eve-accent transition-colors"
               aria-label="GitHub"
             >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
+              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8" />
               </svg>
             </a>
@@ -273,79 +273,142 @@ function App() {
               className="p-1 rounded-sm hover:bg-eve-panel hover:text-eve-accent transition-colors"
               aria-label="Discord"
             >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 16 16"
-                fill="currentColor"
-                aria-hidden="true"
-              >
+              <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                 <path d="M13.545 2.907a13.2 13.2 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.2 12.2 0 0 0-3.658 0 8 8 0 0 0-.412-.833.05.05 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.04.04 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032q.003.022.021.037a13.3 13.3 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019q.463-.63.818-1.329a.05.05 0 0 0-.01-.059l-.018-.011a9 9 0 0 1-1.248-.595.05.05 0 0 1-.02-.066l.015-.019q.127-.095.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.05.05 0 0 1 .053.007q.121.1.248.195a.05.05 0 0 1-.004.085 8 8 0 0 1-1.249.594.05.05 0 0 0-.03.03.05.05 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.2 13.2 0 0 0 4.001-2.02.05.05 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.03.03 0 0 0-.02-.019m-8.198 7.307c-.789 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612m5.316 0c-.788 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612" />
               </svg>
             </a>
           </div>
         </div>
-        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-          {/* Watchlist button */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          {/* Desktop controls — hidden on mobile */}
+          <div className="hidden sm:flex items-center gap-2">
+            {/* Watchlist button */}
+            <button
+              onClick={() => setShowWatchlist(true)}
+              className="flex items-center gap-1.5 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
+              title={t("tabWatchlist")}
+              aria-label={t("tabWatchlist")}
+            >
+              <span aria-hidden="true">&#11088;</span>
+              <span>{t("tabWatchlist")}</span>
+            </button>
+            {/* History button */}
+            <button
+              onClick={() => setShowHistory(true)}
+              className="flex items-center gap-1.5 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
+              title={t("tabHistory")}
+              aria-label={t("tabHistory")}
+            >
+              <span aria-hidden="true">&#128203;</span>
+              <span>{t("tabHistory")}</span>
+            </button>
+            {/* Auth chip */}
+            <div className="flex items-center gap-1 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs">
+              {authStatus.logged_in ? (
+                <>
+                  <button
+                    onClick={() => setShowCharacter(true)}
+                    className="flex items-center gap-2 hover:bg-eve-dark/50 rounded-sm px-1 py-0.5 transition-colors"
+                    title={t("charViewInfo")}
+                  >
+                    <img
+                      src={`https://images.evetech.net/characters/${authStatus.character_id}/portrait?size=32`}
+                      alt=""
+                      className="w-5 h-5 rounded-sm"
+                    />
+                    <span className="text-eve-accent font-medium">{authStatus.character_name}</span>
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="ml-1 p-1 text-eve-dim hover:text-eve-error hover:bg-eve-dark/50 rounded-sm transition-colors"
+                    title={t("logout")}
+                    aria-label={t("logout")}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleLogin}
+                  disabled={loginPolling}
+                  className="text-eve-accent hover:text-eve-accent-hover transition-colors disabled:opacity-60"
+                >
+                  {loginPolling ? t("loginWaiting") : t("loginEve")}
+                </button>
+              )}
+            </div>
+            <StatusBar />
+          </div>
+          <ThemeSwitcher />
+          <LanguageSwitcher />
+          {/* Hamburger menu — visible only on mobile */}
           <button
-            onClick={() => setShowWatchlist(true)}
-            className="flex items-center gap-1.5 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
-            title={t("tabWatchlist")}
-            aria-label={t("tabWatchlist")}
+            onClick={() => setMobileMenuOpen(v => !v)}
+            className="sm:hidden flex items-center justify-center h-[34px] w-[34px] rounded-sm
+                       bg-eve-panel border border-eve-border hover:border-eve-accent/50 transition-colors"
+            aria-label="Menu"
           >
-            <span aria-hidden="true">⭐</span>
-            <span className="hidden sm:inline">{t("tabWatchlist")}</span>
+            <svg className="w-4 h-4 text-eve-dim" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              {mobileMenuOpen
+                ? <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                : <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              }
+            </svg>
           </button>
-          {/* History button */}
+        </div>
+      </div>
+
+      {/* Mobile menu dropdown */}
+      {mobileMenuOpen && (
+        <div className="sm:hidden flex flex-wrap items-center gap-1.5 px-1 pb-1 -mt-0.5 animate-in fade-in">
           <button
-            onClick={() => setShowHistory(true)}
-            className="flex items-center gap-1.5 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
-            title={t("tabHistory")}
-            aria-label={t("tabHistory")}
+            onClick={() => { setShowWatchlist(true); setMobileMenuOpen(false); }}
+            className="flex items-center gap-1.5 h-9 px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim"
           >
-            <span aria-hidden="true">📋</span>
-            <span className="hidden sm:inline">{t("tabHistory")}</span>
+            <span>&#11088;</span><span>{t("tabWatchlist")}</span>
           </button>
-          {/* Auth chip — same style as StatusBar */}
-          <div className="flex items-center gap-1 h-[34px] px-3 bg-eve-panel border border-eve-border rounded-sm text-xs">
+          <button
+            onClick={() => { setShowHistory(true); setMobileMenuOpen(false); }}
+            className="flex items-center gap-1.5 h-9 px-3 bg-eve-panel border border-eve-border rounded-sm text-xs text-eve-dim"
+          >
+            <span>&#128203;</span><span>{t("tabHistory")}</span>
+          </button>
+          <div className="flex items-center gap-1 h-9 px-3 bg-eve-panel border border-eve-border rounded-sm text-xs">
             {authStatus.logged_in ? (
               <>
                 <button
-                  onClick={() => setShowCharacter(true)}
-                  className="flex items-center gap-2 hover:bg-eve-dark/50 rounded-sm px-1 py-0.5 transition-colors"
-                  title={t("charViewInfo")}
+                  onClick={() => { setShowCharacter(true); setMobileMenuOpen(false); }}
+                  className="flex items-center gap-2"
                 >
                   <img
                     src={`https://images.evetech.net/characters/${authStatus.character_id}/portrait?size=32`}
-                    alt=""
-                    className="w-5 h-5 rounded-sm"
+                    alt="" className="w-5 h-5 rounded-sm"
                   />
                   <span className="text-eve-accent font-medium">{authStatus.character_name}</span>
                 </button>
-                <button
-                  onClick={handleLogout}
-                  className="ml-1 p-1 text-eve-dim hover:text-eve-error hover:bg-eve-dark/50 rounded-sm transition-colors"
-                  title={t("logout")}
-                  aria-label={t("logout")}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                  </svg>
+                <button onClick={handleLogout} className="ml-1 p-1 text-eve-dim hover:text-eve-error">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                 </button>
               </>
             ) : (
-              <button
-                onClick={handleLogin}
-                disabled={loginPolling}
-                className="text-eve-accent hover:text-eve-accent-hover transition-colors disabled:opacity-60"
-              >
+              <button onClick={handleLogin} disabled={loginPolling} className="text-eve-accent disabled:opacity-60">
                 {loginPolling ? t("loginWaiting") : t("loginEve")}
               </button>
             )}
           </div>
-          <LanguageSwitcher />
+          <a href="https://github.com/ilyaux/Eve-flipper" target="_blank" rel="noreferrer"
+            className="flex items-center justify-center h-9 w-9 bg-eve-panel border border-eve-border rounded-sm text-eve-dim">
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8" /></svg>
+          </a>
+          <a href="https://discord.gg/Z9pXSGcJZE" target="_blank" rel="noreferrer"
+            className="flex items-center justify-center h-9 w-9 bg-eve-panel border border-eve-border rounded-sm text-eve-dim">
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor"><path d="M13.545 2.907a13.2 13.2 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.2 12.2 0 0 0-3.658 0 8 8 0 0 0-.412-.833.05.05 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.04.04 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032q.003.022.021.037a13.3 13.3 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019q.463-.63.818-1.329a.05.05 0 0 0-.01-.059l-.018-.011a9 9 0 0 1-1.248-.595.05.05 0 0 1-.02-.066l.015-.019q.127-.095.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.05.05 0 0 1 .053.007q.121.1.248.195a.05.05 0 0 1-.004.085 8 8 0 0 1-1.249.594.05.05 0 0 0-.03.03.05.05 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.2 13.2 0 0 0 4.001-2.02.05.05 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.03.03 0 0 0-.02-.019m-8.198 7.307c-.789 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612m5.316 0c-.788 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612" /></svg>
+          </a>
           <StatusBar />
         </div>
-      </div>
+      )}
 
       {/* Parameters - shown for tabs that use global scan params (Flipper, Regional, Contracts, Route) */}
       {(tab === "radius" || tab === "region" || tab === "contracts" || tab === "route") && (
@@ -356,7 +419,7 @@ function App() {
 
       {/* Tabs */}
       <div className="flex-1 flex flex-col min-h-0 bg-eve-panel border border-eve-border rounded-sm">
-        <div className="flex items-center border-b border-eve-border overflow-x-auto scrollbar-thin" role="tablist" aria-label="Scan modes">
+        <div className="flex items-center border-b border-eve-border overflow-x-auto scrollbar-thin snap-x snap-mandatory sm:snap-none" role="tablist" aria-label="Scan modes">
           <TabButton
             active={tab === "radius"}
             onClick={() => setTab("radius")}
@@ -394,13 +457,18 @@ function App() {
             onClick={() => setTab("demand")}
             label={t("tabDemand") || "War Tracker"}
           />
-          <div className="flex-1 min-w-[20px]" />
-          {tab !== "route" && tab !== "station" && tab !== "industry" && tab !== "demand" && <button
+          <TabButton
+            active={tab === "plex"}
+            onClick={() => setTab("plex")}
+            label={t("tabPlex") || "PLEX+"}
+          />
+          <div className="flex-1 min-w-[12px] sm:min-w-[20px]" />
+          {tab !== "route" && tab !== "station" && tab !== "industry" && tab !== "demand" && tab !== "plex" && <button
             data-scan-button
             onClick={handleScan}
             disabled={!params.system_name}
             title="Ctrl+S"
-            className={`mr-2 sm:mr-3 px-3 sm:px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all shrink-0
+            className={`mr-1.5 sm:mr-3 px-3 sm:px-5 py-1.5 rounded-sm text-[10px] sm:text-xs font-semibold uppercase tracking-wider transition-all shrink-0
               ${
                 scanning
                   ? "bg-eve-error/80 text-white hover:bg-eve-error"
@@ -413,7 +481,7 @@ function App() {
         </div>
 
         {/* Results — all tabs stay mounted to preserve state */}
-        <div className="flex-1 min-h-0 flex flex-col p-2">
+        <div className="flex-1 min-h-0 flex flex-col p-1.5 sm:p-2">
           <div className={`flex-1 min-h-0 flex flex-col ${tab === "radius" ? "" : "hidden"}`}>
             <ScanResultsTable results={radiusResults} scanning={scanning && tab === "radius"} progress={tab === "radius" ? progress : ""} salesTaxPercent={params.sales_tax_percent} />
           </div>
@@ -446,6 +514,9 @@ function App() {
                 addToast(`${t("targetRegionSet") || "Target region set to"} ${regionName}`, "success");
               }}
             />
+          </div>
+          <div className={`flex-1 min-h-0 flex flex-col ${tab === "plex" ? "" : "hidden"}`}>
+            <PlexTab />
           </div>
         </div>
       </div>
@@ -551,7 +622,7 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-colors relative
+      className={`px-2.5 py-2 sm:px-4 sm:py-2.5 text-[10px] sm:text-xs font-medium uppercase tracking-wider transition-colors relative whitespace-nowrap snap-center shrink-0
         ${
           active
             ? "text-eve-accent"

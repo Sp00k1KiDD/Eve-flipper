@@ -110,6 +110,7 @@ export function RouteBuilder({ params, loadedResults }: Props) {
           hint={t("routeSettingsHint")}
           icon="🗺"
           defaultExpanded={true}
+          persistKey="route"
           help={{ stepKeys: ["helpRouteStep1", "helpRouteStep2", "helpRouteStep3"], wikiSlug: "Route-Builder" }}
         >
           <div className="flex items-center gap-4 flex-wrap">
@@ -261,7 +262,7 @@ function RouteDetailPopup({
       onClick={onClose}
     >
       <div
-        className="bg-eve-panel border border-eve-border rounded-sm max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col shadow-2xl"
+        className="bg-eve-panel border border-eve-border rounded-sm max-w-2xl w-full mx-2 sm:mx-4 max-h-[90vh] sm:max-h-[80vh] flex flex-col shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

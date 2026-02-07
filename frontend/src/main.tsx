@@ -1,19 +1,25 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { I18nProvider } from "./lib/i18n";
+import { ThemeProvider } from "./lib/useTheme";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
 import App from "./App";
+import { CorpDashboardApp } from "./components/CorpDashboardApp";
 import "./index.css";
+
+const isCorpRoute = window.location.pathname.startsWith("/corp");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <I18nProvider>
-      <ErrorBoundary>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </ErrorBoundary>
-    </I18nProvider>
+    <ThemeProvider>
+      <I18nProvider>
+        <ErrorBoundary>
+          <ToastProvider>
+            {isCorpRoute ? <CorpDashboardApp /> : <App />}
+          </ToastProvider>
+        </ErrorBoundary>
+      </I18nProvider>
+    </ThemeProvider>
   </React.StrictMode>
 );

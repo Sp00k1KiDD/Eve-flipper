@@ -115,7 +115,7 @@ function VirtualRow({
       style={{ ...style, display: "grid", gridTemplateColumns: gridTemplate }}
       onContextMenu={(e) => handleContextMenu(e, row)}
       className={`gap-0 border-b border-eve-border/50 hover:bg-eve-accent/5 transition-colors ${compactMode ? "text-xs" : "text-sm"} ${
-        isPinned ? "bg-eve-accent/10 border-l-2 border-l-eve-accent" : isSelected ? "bg-eve-accent/5" : index % 2 === 0 ? "bg-eve-panel" : "bg-[#161616]"
+        isPinned ? "bg-eve-accent/10 border-l-2 border-l-eve-accent" : isSelected ? "bg-eve-accent/5" : index % 2 === 0 ? "bg-eve-panel" : "bg-eve-dark"
       }`}
     >
       <div className="px-1 py-1 flex items-center justify-center">
@@ -471,7 +471,7 @@ export function ScanResultsTable({ results, scanning, progress, scanCompletedWit
       </div>
 
       {/* Table */}
-      <div className={`flex-1 min-h-0 flex flex-col border border-eve-border rounded-sm ${useVirtual ? "overflow-hidden" : "overflow-auto"}`}>
+      <div className={`flex-1 min-h-0 flex flex-col border border-eve-border rounded-sm table-scroll-wrapper ${useVirtual ? "overflow-hidden" : "overflow-auto table-scroll-container"}`}>
         {useVirtual ? (
           <>
             {/* Virtualized: sticky header */}
@@ -576,7 +576,7 @@ export function ScanResultsTable({ results, scanning, progress, scanCompletedWit
                         ? "bg-eve-accent/5"
                         : i % 2 === 0
                           ? "bg-eve-panel"
-                          : "bg-[#161616]"
+                          : "bg-eve-dark"
                   }`}
                 >
                   {/* Checkbox */}

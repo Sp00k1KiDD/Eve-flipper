@@ -28,10 +28,25 @@ const inputClass =
   "focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30 transition-colors " +
   "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
+const PERSIST_KEY = "eve-settings-expanded:params";
+
 export function ParametersPanel({ params, onChange, isLoggedIn = false, tab = "radius" }: Props) {
   const { t } = useI18n();
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [expanded, setExpanded] = useState(() => {
+    const stored = localStorage.getItem(PERSIST_KEY);
+    if (stored !== null) return stored === "1";
+    return true;
+  });
   const help = HELP_STEPS[tab];
+
+  const toggleExpanded = () => {
+    setExpanded((prev) => {
+      const next = !prev;
+      localStorage.setItem(PERSIST_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
 
   const set = <K extends keyof ScanParams>(key: K, value: ScanParams[K]) => {
     onChange({ ...params, [key]: value });
@@ -39,12 +54,23 @@ export function ParametersPanel({ params, onChange, isLoggedIn = false, tab = "r
 
   return (
     <div className="bg-eve-panel border border-eve-border rounded-sm overflow-visible">
-      {/* Header: preset picker + help */}
+      {/* Header: collapse toggle + preset picker + help */}
       <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-eve-border/60 bg-eve-panel/80">
-        <PresetPicker params={params} onApply={onChange} tab={tab} builtinPresets={getPresetsForTab(tab)} />
-        {help && <TabHelp stepKeys={help.steps} wikiSlug={help.wiki} />}
+        <button
+          onClick={toggleExpanded}
+          className="flex items-center gap-2 text-left hover:bg-eve-accent/5 transition-colors rounded-sm px-1 -ml-1"
+        >
+          <span className="text-eve-accent text-sm">⚙</span>
+          <span className="text-sm font-medium text-eve-text">{t("scanParameters")}</span>
+          <span className="text-eve-dim text-xs">{expanded ? "▲" : "▼"}</span>
+        </button>
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <PresetPicker params={params} onApply={onChange} tab={tab} builtinPresets={getPresetsForTab(tab)} />
+          {help && <TabHelp stepKeys={help.steps} wikiSlug={help.wiki} />}
+        </div>
       </div>
 
+      {expanded && (
       <div className="p-3">
         {/* Main grid - 4 columns on desktop, 2 on mobile */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
@@ -200,6 +226,7 @@ export function ParametersPanel({ params, onChange, isLoggedIn = false, tab = "r
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

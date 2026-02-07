@@ -189,7 +189,7 @@ export function ScanHistory({ onLoadResults }: ScanHistoryProps) {
         </div>
 
         <div className="flex-1 overflow-auto p-4">
-          <div className="grid grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4">
             <div className="bg-eve-panel p-3 rounded border border-eve-border">
               <div className="text-xs text-eve-dim uppercase">{t("historyResults")}</div>
               <div className="text-xl font-mono text-eve-text">{viewingResults.scan.count}</div>

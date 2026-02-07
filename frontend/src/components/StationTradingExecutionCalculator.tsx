@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Modal } from "./Modal";
 import { getExecutionPlan } from "../lib/api";
 import { useI18n, type TranslationKey } from "../lib/i18n";
-import type { ExecutionPlanResult } from "../lib/types";
+import type { ExecutionPlanResult, DepthLevel } from "../lib/types";
 
 export interface StationTradingExecutionCalculatorProps {
   open: boolean;
@@ -91,21 +91,174 @@ function OrderSideBlock({
       </table>
       {plan.depth_levels && plan.depth_levels.length > 0 && (
         <div className="px-3 py-2 border-t border-eve-border bg-eve-bg/50">
-          <div className="text-[10px] uppercase tracking-wider text-eve-dim mb-1">{t("execPlanFillCurve")}</div>
-          <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs font-mono mb-1">
-            {plan.depth_levels.slice(0, 8).map((lv, i) => (
-              <span key={i} className="text-eve-dim">
-                {formatISK(lv.price)}×{lv.volume_filled.toLocaleString()}
-              </span>
-            ))}
-            {plan.depth_levels.length > 8 && (
-              <span className="text-eve-dim">+{plan.depth_levels.length - 8}</span>
-            )}
-          </div>
-          <p className="text-[10px] text-eve-dim leading-tight">{t("execPlanFillCurveHint")}</p>
+          <div className="text-[10px] uppercase tracking-wider text-eve-dim mb-1.5">{t("execPlanFillCurve")}</div>
+          <FillCurveChart levels={plan.depth_levels} expectedPrice={plan.expected_price} isBuy={isBuy} />
+          <p className="text-[10px] text-eve-dim leading-tight mt-1.5">{t("execPlanFillCurveHint")}</p>
         </div>
       )}
     </div>
+  );
+}
+
+// ===================================================================
+// Fill Curve SVG Chart — step chart showing price vs cumulative volume
+// ===================================================================
+
+const CHART_W = 320;
+const CHART_H = 100;
+const PAD = { top: 6, right: 8, bottom: 22, left: 52 };
+
+function FillCurveChart({
+  levels,
+  expectedPrice,
+  isBuy,
+}: {
+  levels: DepthLevel[];
+  expectedPrice: number;
+  isBuy: boolean;
+}) {
+  if (levels.length === 0) return null;
+
+  // Data bounds
+  const maxCum = levels[levels.length - 1].cumulative || 1;
+  const prices = levels.map((l) => l.price);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const priceRange = maxPrice - minPrice || 1;
+
+  // Coordinate mappers
+  const plotW = CHART_W - PAD.left - PAD.right;
+  const plotH = CHART_H - PAD.top - PAD.bottom;
+  const xOf = (cum: number) => PAD.left + (cum / maxCum) * plotW;
+  const yOf = (price: number) => PAD.top + plotH - ((price - minPrice) / priceRange) * plotH;
+
+  // Build step path: for each level, draw horizontal then vertical
+  const filledLevels = levels.filter((l) => l.volume_filled > 0);
+  const totalFilled = filledLevels.reduce((s, l) => s + l.volume_filled, 0);
+
+  let stepPath = "";
+  let fillPath = "";
+
+  // Step line (full order book visible)
+  levels.forEach((lv, i) => {
+    const x1 = xOf(i === 0 ? 0 : levels[i - 1].cumulative);
+    const x2 = xOf(lv.cumulative);
+    const y = yOf(lv.price);
+    if (i === 0) {
+      stepPath += `M${x1},${y}`;
+    }
+    stepPath += ` L${x2},${y}`;
+    if (i < levels.length - 1) {
+      stepPath += ` L${x2},${yOf(levels[i + 1].price)}`;
+    }
+  });
+
+  // Filled area (the portion the user's order fills)
+  if (filledLevels.length > 0) {
+    let fc = 0;
+    fillPath = `M${xOf(0)},${yOf(filledLevels[0].price)}`;
+    filledLevels.forEach((lv) => {
+      const x1 = xOf(fc);
+      fc += lv.volume_filled;
+      const x2 = xOf(fc);
+      const y = yOf(lv.price);
+      fillPath += ` L${x1},${y} L${x2},${y}`;
+    });
+    // Close down to baseline
+    fillPath += ` L${xOf(totalFilled)},${yOf(minPrice)} L${xOf(0)},${yOf(minPrice)} Z`;
+  }
+
+  // Expected price line
+  const epY = yOf(expectedPrice);
+
+  // Axis labels — pick 3 price ticks
+  const priceTicks = [minPrice, (minPrice + maxPrice) / 2, maxPrice];
+  // Volume ticks — 0 and max
+  const volTicks = [0, maxCum];
+
+  return (
+    <svg
+      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+      className="w-full h-auto"
+      style={{ maxHeight: 110 }}
+      role="img"
+      aria-label="Fill curve chart"
+    >
+      {/* Grid lines */}
+      {priceTicks.map((p, i) => (
+        <line key={`hg${i}`} x1={PAD.left} x2={CHART_W - PAD.right} y1={yOf(p)} y2={yOf(p)}
+          stroke="currentColor" className="text-eve-border" strokeWidth={0.5} strokeDasharray="2,2" />
+      ))}
+
+      {/* Filled area (green for buy, orange for sell) */}
+      {fillPath && (
+        <path d={fillPath} fill={isBuy ? "rgba(0,180,80,0.2)" : "rgba(230,149,0,0.2)"} />
+      )}
+
+      {/* Step line — full depth */}
+      <path d={stepPath} fill="none" stroke="currentColor" className="text-eve-dim" strokeWidth={1} />
+
+      {/* Filled portion highlighted */}
+      {filledLevels.length > 0 && (() => {
+        let fc = 0;
+        let fp = `M${xOf(0)},${yOf(filledLevels[0].price)}`;
+        filledLevels.forEach((lv) => {
+          const x1 = xOf(fc);
+          fc += lv.volume_filled;
+          const x2 = xOf(fc);
+          fp += ` L${x1},${yOf(lv.price)} L${x2},${yOf(lv.price)}`;
+        });
+        return <path d={fp} fill="none" stroke={isBuy ? "#00b450" : "#e69500"} strokeWidth={1.5} />;
+      })()}
+
+      {/* Expected price dashed line */}
+      <line x1={PAD.left} x2={CHART_W - PAD.right} y1={epY} y2={epY}
+        stroke="#e69500" strokeWidth={0.8} strokeDasharray="3,2" />
+      <text x={CHART_W - PAD.right + 2} y={epY + 3} className="text-[7px] fill-eve-accent" textAnchor="start">
+        avg
+      </text>
+
+      {/* Fill boundary vertical line */}
+      {totalFilled > 0 && (
+        <>
+          <line x1={xOf(totalFilled)} x2={xOf(totalFilled)} y1={PAD.top} y2={CHART_H - PAD.bottom}
+            stroke={isBuy ? "#00b450" : "#e69500"} strokeWidth={0.8} strokeDasharray="2,2" />
+          <text x={xOf(totalFilled)} y={PAD.top - 1} className="text-[7px]"
+            fill={isBuy ? "#00b450" : "#e69500"} textAnchor="middle">
+            {formatISK(totalFilled)}
+          </text>
+        </>
+      )}
+
+      {/* Y axis labels (price) */}
+      {priceTicks.map((p, i) => (
+        <text key={`pl${i}`} x={PAD.left - 4} y={yOf(p) + 3}
+          className="text-[7px] fill-eve-dim" textAnchor="end">
+          {formatISK(p)}
+        </text>
+      ))}
+
+      {/* X axis labels (volume) */}
+      {volTicks.map((v, i) => (
+        <text key={`vl${i}`} x={xOf(v)} y={CHART_H - PAD.bottom + 12}
+          className="text-[7px] fill-eve-dim" textAnchor={i === 0 ? "start" : "end"}>
+          {v === 0 ? "0" : formatISK(v)}
+        </text>
+      ))}
+
+      {/* Axis labels */}
+      <text x={CHART_W / 2} y={CHART_H - 2} className="text-[7px] fill-eve-dim" textAnchor="middle">
+        volume
+      </text>
+      <text x={4} y={CHART_H / 2} className="text-[7px] fill-eve-dim" textAnchor="middle"
+        transform={`rotate(-90, 4, ${CHART_H / 2})`}>
+        price
+      </text>
+
+      {/* Plot border */}
+      <rect x={PAD.left} y={PAD.top} width={plotW} height={plotH}
+        fill="none" stroke="currentColor" className="text-eve-border" strokeWidth={0.5} />
+    </svg>
   );
 }
 

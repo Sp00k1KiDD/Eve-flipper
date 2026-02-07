@@ -637,3 +637,327 @@ export interface RegionOpportunities {
   ammo: TradeOpportunity[];
   total_potential: number;
 }
+
+// --- PLEX+ Types ---
+
+export interface PLEXGlobalPrice {
+  buy_price: number;
+  sell_price: number;
+  spread: number;
+  spread_pct: number;
+  volume_24h: number;
+  buy_orders: number;
+  sell_orders: number;
+}
+
+export interface ArbitragePath {
+  name: string;
+  type: "nes_sell" | "nes_process" | "market_process" | "spread";
+  plex_cost: number;
+  cost_isk: number;
+  revenue_gross: number;
+  revenue_isk: number;
+  profit_isk: number;
+  roi: number;
+  viable: boolean;
+  no_data: boolean;
+  detail: string;
+}
+
+export interface SPFarmResult {
+  omega_cost_plex: number;
+  omega_cost_isk: number;
+  extractors_per_month: number;
+  extractor_cost_plex: number;
+  extractor_cost_isk: number;
+  total_cost_isk: number;
+  injectors_produced: number;
+  injector_sell_price: number;
+  revenue_isk: number;
+  profit_isk: number;
+  profit_per_day: number;
+  roi: number;
+  viable: boolean;
+  extractors_plus5: number;
+  profit_plus5: number;
+  profit_per_day_plus5: number;
+  roi_plus5: number;
+  // Startup & multi-char
+  startup_sp: number;
+  startup_train_days: number;
+  startup_cost_isk: number;
+  payback_days: number;
+  mptc_cost_plex: number;
+  mptc_cost_isk: number;
+  // Omega ISK value
+  omega_isk_value: number;
+  plex_unit_price: number;
+  // Instant sell alternative
+  instant_sell_revenue_isk: number;
+  instant_sell_profit_isk: number;
+  instant_sell_roi: number;
+}
+
+export interface PLEXIndicators {
+  sma7: number;
+  sma30: number;
+  bollinger_upper: number;
+  bollinger_middle: number;
+  bollinger_lower: number;
+  rsi: number;
+  change_24h: number;
+  change_7d: number;
+  change_30d: number;
+  avg_volume_30d: number;
+  volume_today: number;
+  volume_sigma: number;
+  ccp_sale_signal: boolean;
+}
+
+export interface PLEXSignal {
+  action: "BUY" | "SELL" | "HOLD";
+  confidence: number;
+  reasons: string[];
+}
+
+export interface PricePoint {
+  date: string;
+  average: number;
+  high: number;
+  low: number;
+  volume: number;
+}
+
+export interface ChartOverlayPoint {
+  date: string;
+  value: number;
+}
+
+export interface ChartOverlays {
+  sma7?: ChartOverlayPoint[];
+  sma30?: ChartOverlayPoint[];
+  bollinger_upper?: ChartOverlayPoint[];
+  bollinger_lower?: ChartOverlayPoint[];
+}
+
+export interface ArbHistoryPoint {
+  date: string;
+  profit_isk: number;
+  roi: number;
+}
+
+export interface ArbHistoryData {
+  extractor_nes?: ArbHistoryPoint[];
+  sp_chain_nes?: ArbHistoryPoint[];
+  mptc_nes?: ArbHistoryPoint[];
+  sp_farm_profit?: ArbHistoryPoint[];
+}
+
+export interface DepthSummary {
+  total_volume: number;
+  best_price: number;
+  worst_price: number;
+  levels: number;
+}
+
+export interface MarketDepthInfo {
+  plex_sell_depth_5: DepthSummary;
+  extractor_sell_qty: number;
+  extractor_buy_qty: number;
+  injector_sell_qty: number;
+  injector_buy_qty: number;
+  mptc_sell_qty: number;
+  mptc_buy_qty: number;
+}
+
+export interface PLEXDashboard {
+  plex_price: PLEXGlobalPrice;
+  arbitrage: ArbitragePath[];
+  sp_farm: SPFarmResult;
+  indicators: PLEXIndicators | null;
+  chart_overlays?: ChartOverlays | null;
+  arb_history?: ArbHistoryData | null;
+  market_depth?: MarketDepthInfo | null;
+  signal: PLEXSignal;
+  history: PricePoint[];
+}
+
+// ============================================================
+// Corporation types
+// ============================================================
+
+export interface CharacterRoles {
+  roles: string[];
+  is_director: boolean;
+  corporation_id: number;
+}
+
+export interface CorpWalletDivision {
+  division: number;
+  name: string;
+  balance: number;
+}
+
+export interface IncomeSource {
+  category: string;
+  label: string;
+  amount: number;
+  percent: number;
+}
+
+export interface DailyPnLEntry {
+  date: string;
+  revenue: number;
+  expenses: number;
+  net_income: number;
+  cumulative: number;
+  transactions: number;
+}
+
+export interface MemberContribution {
+  character_id: number;
+  name: string;
+  total_isk: number;
+  category: string;
+  is_online: boolean;
+}
+
+export interface MemberSummary {
+  total_members: number;
+  active_last_7d: number;
+  active_last_30d: number;
+  inactive_30d: number;
+  miners: number;
+  ratters: number;
+  traders: number;
+  industrialists: number;
+  pvpers: number;
+  other: number;
+}
+
+export interface ProductEntry {
+  type_id: number;
+  type_name: string;
+  runs: number;
+  jobs: number;
+}
+
+export interface OreEntry {
+  type_id: number;
+  type_name: string;
+  quantity: number;
+}
+
+export interface IndustrySummary {
+  active_jobs: number;
+  completed_jobs_30d: number;
+  production_value: number;
+  top_products: ProductEntry[];
+}
+
+export interface MiningSummary {
+  total_volume_30d: number;
+  estimated_isk: number;
+  active_miners: number;
+  top_ores: OreEntry[];
+}
+
+export interface MarketSummary {
+  active_buy_orders: number;
+  active_sell_orders: number;
+  total_buy_value: number;
+  total_sell_value: number;
+  unique_traders: number;
+}
+
+export interface CorpJournalEntry {
+  id: number;
+  date: string;
+  ref_type: string;
+  amount: number;
+  balance: number;
+  description: string;
+  first_party_id: number;
+  first_party_name: string;
+  second_party_id: number;
+  second_party_name: string;
+}
+
+export interface CorpMember {
+  character_id: number;
+  name: string;
+  last_login: string;
+  logoff_date: string;
+  ship_type_id: number;
+  ship_name: string;
+  location_id: number;
+  system_id: number;
+  system_name: string;
+}
+
+export interface CorpMarketOrderDetail {
+  order_id: number;
+  character_id: number;
+  character_name: string;
+  type_id: number;
+  type_name: string;
+  price: number;
+  volume_remain: number;
+  volume_total: number;
+  is_buy_order: boolean;
+  location_id: number;
+  location_name: string;
+  issued: string;
+  duration: number;
+  region_id: number;
+}
+
+export interface CorpIndustryJob {
+  job_id: number;
+  installer_id: number;
+  installer_name: string;
+  activity: string;
+  blueprint_type_id: number;
+  product_type_id: number;
+  product_name: string;
+  status: string;
+  runs: number;
+  start_date: string;
+  end_date: string;
+  location_id: number;
+  location_name: string;
+}
+
+export interface CorpMiningEntry {
+  character_id: number;
+  character_name: string;
+  date: string;
+  type_id: number;
+  type_name: string;
+  quantity: number;
+}
+
+export interface CorpDashboard {
+  info: {
+    corporation_id: number;
+    name: string;
+    ticker: string;
+    member_count: number;
+  };
+  is_demo: boolean;
+  wallets: CorpWalletDivision[];
+  total_balance: number;
+  revenue_30d: number;
+  expenses_30d: number;
+  net_income_30d: number;
+  revenue_7d: number;
+  expenses_7d: number;
+  net_income_7d: number;
+  income_by_source: IncomeSource[];
+  daily_pnl: DailyPnLEntry[];
+  top_contributors: MemberContribution[];
+  member_summary: MemberSummary;
+  industry_summary: IndustrySummary;
+  mining_summary: MiningSummary;
+  market_summary: MarketSummary;
+}

@@ -1,4 +1,4 @@
-import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, ContractResult, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationTrade, UndercutStatus, WatchlistItem } from "./types";
+import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationTrade, UndercutStatus, WatchlistItem } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:13370";
 
@@ -510,4 +510,63 @@ export async function refreshDemandData(onProgress?: (msg: string) => void): Pro
     const msg = JSON.parse(buffer) as { type: string; message?: string };
     if (msg.type === "error") throw new Error(msg.message || "Refresh failed");
   }
+}
+
+// --- PLEX+ ---
+
+export interface PLEXDashboardParams {
+  salesTax?: number;
+  brokerFee?: number;
+  nesExtractor?: number;
+  nesMPTC?: number;
+  nesOmega?: number;
+}
+
+export async function getPLEXDashboard(p?: PLEXDashboardParams, signal?: AbortSignal): Promise<PLEXDashboard> {
+  const params = new URLSearchParams();
+  if (p?.salesTax != null) params.set("sales_tax", p.salesTax.toString());
+  if (p?.brokerFee != null) params.set("broker_fee", p.brokerFee.toString());
+  if (p?.nesExtractor != null && p.nesExtractor > 0) params.set("nes_extractor", p.nesExtractor.toString());
+  if (p?.nesMPTC != null && p.nesMPTC > 0) params.set("nes_mptc", p.nesMPTC.toString());
+  if (p?.nesOmega != null && p.nesOmega > 0) params.set("nes_omega", p.nesOmega.toString());
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/plex/dashboard${qs ? "?" + qs : ""}`, { signal });
+  return handleResponse<PLEXDashboard>(res);
+}
+
+// --- Corporation ---
+
+export async function getCharacterRoles(signal?: AbortSignal): Promise<CharacterRoles> {
+  const res = await fetch(`${BASE}/api/auth/roles`, { signal });
+  return handleResponse<CharacterRoles>(res);
+}
+
+export async function getCorpDashboard(mode: "demo" | "live" = "demo", signal?: AbortSignal): Promise<CorpDashboard> {
+  const res = await fetch(`${BASE}/api/corp/dashboard?mode=${mode}`, { signal });
+  return handleResponse<CorpDashboard>(res);
+}
+
+export async function getCorpJournal(mode: "demo" | "live" = "demo", division = 1, days = 90, signal?: AbortSignal): Promise<CorpJournalEntry[]> {
+  const res = await fetch(`${BASE}/api/corp/journal?mode=${mode}&division=${division}&days=${days}`, { signal });
+  return handleResponse<CorpJournalEntry[]>(res);
+}
+
+export async function getCorpMembers(mode: "demo" | "live" = "demo", signal?: AbortSignal): Promise<CorpMember[]> {
+  const res = await fetch(`${BASE}/api/corp/members?mode=${mode}`, { signal });
+  return handleResponse<CorpMember[]>(res);
+}
+
+export async function getCorpOrders(mode: "demo" | "live" = "demo", signal?: AbortSignal): Promise<CorpMarketOrderDetail[]> {
+  const res = await fetch(`${BASE}/api/corp/orders?mode=${mode}`, { signal });
+  return handleResponse<CorpMarketOrderDetail[]>(res);
+}
+
+export async function getCorpIndustryJobs(mode: "demo" | "live" = "demo", signal?: AbortSignal): Promise<CorpIndustryJob[]> {
+  const res = await fetch(`${BASE}/api/corp/industry?mode=${mode}`, { signal });
+  return handleResponse<CorpIndustryJob[]>(res);
+}
+
+export async function getCorpMiningLedger(mode: "demo" | "live" = "demo", signal?: AbortSignal): Promise<CorpMiningEntry[]> {
+  const res = await fetch(`${BASE}/api/corp/mining?mode=${mode}`, { signal });
+  return handleResponse<CorpMiningEntry[]>(res);
 }

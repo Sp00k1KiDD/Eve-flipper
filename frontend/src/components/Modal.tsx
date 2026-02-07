@@ -34,29 +34,29 @@ export function Modal({ open, onClose, title, children, width = "max-w-4xl" }: M
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose();
       }}
     >
       <div
-        className={`${width} w-full mx-4 max-h-[85vh] flex flex-col bg-eve-dark border border-eve-border rounded-sm shadow-2xl`}
+        className={`w-full h-[95vh] sm:h-auto sm:${width} sm:mx-4 sm:max-h-[85vh] flex flex-col bg-eve-dark border border-eve-border rounded-t-lg sm:rounded-sm shadow-2xl`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-eve-border bg-eve-panel">
-          <h2 id={titleId} className="text-sm font-semibold uppercase tracking-wider text-eve-accent">
+        <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-eve-border bg-eve-panel shrink-0">
+          <h2 id={titleId} className="text-xs sm:text-sm font-semibold uppercase tracking-wider text-eve-accent">
             {title}
           </h2>
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="text-eve-dim hover:text-eve-text transition-colors text-lg leading-none"
+            className="text-eve-dim hover:text-eve-text transition-colors text-lg leading-none p-1"
           >
-            ✕
+            &#10005;
           </button>
         </div>
         {/* Content */}
-        <div className="flex-1 overflow-auto">{children}</div>
+        <div className="flex-1 min-h-0 overflow-auto">{children}</div>
       </div>
     </div>
   );

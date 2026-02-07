@@ -279,7 +279,7 @@ export function WatchlistTab({ latestResults }: Props) {
             placeholder={
               t("watchlistSearch" as TranslationKey) || "Search..."
             }
-            className="px-2 py-1 bg-eve-input border border-eve-border rounded-sm text-eve-text text-xs w-36
+            className="px-2 py-1 bg-eve-input border border-eve-border rounded-sm text-eve-text text-xs w-full sm:w-36
                        focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30 transition-colors"
           />
         )}
@@ -321,7 +321,7 @@ export function WatchlistTab({ latestResults }: Props) {
       </div>
 
       {/* Table */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-auto table-scroll-wrapper table-scroll-container">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-eve-dim text-xs">
             <span>{t("watchlistEmpty")}</span>
@@ -361,7 +361,7 @@ export function WatchlistTab({ latestResults }: Props) {
                         ? "bg-green-900/20 hover:bg-green-900/30"
                         : i % 2 === 0
                           ? "bg-eve-panel hover:bg-eve-accent/5"
-                          : "bg-[#161616] hover:bg-eve-accent/5"
+                          : "bg-eve-dark hover:bg-eve-accent/5"
                     }`}
                   >
                     {/* Item name */}

@@ -4,35 +4,362 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===================================================================
+   Theme system: palette × mode (dark/light)
+   Color vars are RGB triplets so Tailwind opacity modifiers work:
+     bg-eve-accent/10  →  rgb(var(--eve-accent) / 0.1)
+   Direct CSS usage:  rgb(var(--eve-accent))
+   =================================================================== */
+
+/* ---------- DARK palettes ---------- */
+
+/* Classic EVE gold — default */
+:root,
+[data-palette="classic"][data-mode="dark"] {
+  --eve-dark: 13 13 13;
+  --eve-panel: 26 26 26;
+  --eve-panel-hover: 34 34 34;
+  --eve-input: 35 35 35;
+  --eve-accent: 230 149 0;
+  --eve-accent-hover: 240 165 0;
+  --eve-accent-dim: 179 116 0;
+  --eve-text: 192 192 192;
+  --eve-dim: 140 140 140;
+  --eve-success: 0 180 80;
+  --eve-error: 220 60 60;
+  --eve-warning: 230 149 0;
+  --eve-border: 42 42 42;
+  --eve-border-light: 58 58 58;
+  --eve-glow: rgba(230, 149, 0, 0.15);
+  --eve-selection: rgba(230, 149, 0, 0.3);
+  --eve-scrollbar-track: #0d0d0d;
+  --eve-scrollbar-thumb: #3a3a3a;
+  --eve-scrollbar-thumb-hover: #555;
+}
+
+/* Caldari blue */
+[data-palette="caldari"][data-mode="dark"] {
+  --eve-dark: 10 14 20;
+  --eve-panel: 17 24 32;
+  --eve-panel-hover: 26 34 48;
+  --eve-input: 22 30 40;
+  --eve-accent: 74 158 255;
+  --eve-accent-hover: 106 180 255;
+  --eve-accent-dim: 42 108 192;
+  --eve-text: 184 200 216;
+  --eve-dim: 106 122 138;
+  --eve-success: 0 180 80;
+  --eve-error: 220 60 60;
+  --eve-warning: 230 149 0;
+  --eve-border: 30 42 56;
+  --eve-border-light: 42 58 74;
+  --eve-glow: rgba(74, 158, 255, 0.15);
+  --eve-selection: rgba(74, 158, 255, 0.3);
+  --eve-scrollbar-track: #0a0e14;
+  --eve-scrollbar-thumb: #2a3a4a;
+  --eve-scrollbar-thumb-hover: #3a5060;
+}
+
+/* Amarr gold */
+[data-palette="amarr"][data-mode="dark"] {
+  --eve-dark: 18 16 10;
+  --eve-panel: 30 26 16;
+  --eve-panel-hover: 40 34 26;
+  --eve-input: 34 32 24;
+  --eve-accent: 255 215 0;
+  --eve-accent-hover: 255 224 64;
+  --eve-accent-dim: 192 160 0;
+  --eve-text: 208 200 176;
+  --eve-dim: 138 128 104;
+  --eve-success: 0 180 80;
+  --eve-error: 220 60 60;
+  --eve-warning: 230 149 0;
+  --eve-border: 42 38 24;
+  --eve-border-light: 58 52 40;
+  --eve-glow: rgba(255, 215, 0, 0.12);
+  --eve-selection: rgba(255, 215, 0, 0.3);
+  --eve-scrollbar-track: #12100a;
+  --eve-scrollbar-thumb: #3a3428;
+  --eve-scrollbar-thumb-hover: #504838;
+}
+
+/* Minmatar red */
+[data-palette="minmatar"][data-mode="dark"] {
+  --eve-dark: 18 10 10;
+  --eve-panel: 30 18 18;
+  --eve-panel-hover: 42 26 26;
+  --eve-input: 34 22 22;
+  --eve-accent: 224 80 64;
+  --eve-accent-hover: 240 96 80;
+  --eve-accent-dim: 168 48 32;
+  --eve-text: 200 176 176;
+  --eve-dim: 138 106 106;
+  --eve-success: 0 180 80;
+  --eve-error: 220 60 60;
+  --eve-warning: 230 149 0;
+  --eve-border: 42 24 24;
+  --eve-border-light: 58 40 40;
+  --eve-glow: rgba(224, 80, 64, 0.15);
+  --eve-selection: rgba(224, 80, 64, 0.3);
+  --eve-scrollbar-track: #120a0a;
+  --eve-scrollbar-thumb: #3a2828;
+  --eve-scrollbar-thumb-hover: #504040;
+}
+
+/* Gallente green */
+[data-palette="gallente"][data-mode="dark"] {
+  --eve-dark: 10 18 10;
+  --eve-panel: 18 30 18;
+  --eve-panel-hover: 26 42 26;
+  --eve-input: 22 34 22;
+  --eve-accent: 64 192 96;
+  --eve-accent-hover: 80 216 112;
+  --eve-accent-dim: 40 144 64;
+  --eve-text: 176 200 176;
+  --eve-dim: 106 138 106;
+  --eve-success: 64 192 96;
+  --eve-error: 220 60 60;
+  --eve-warning: 230 149 0;
+  --eve-border: 24 42 24;
+  --eve-border-light: 40 58 40;
+  --eve-glow: rgba(64, 192, 96, 0.15);
+  --eve-selection: rgba(64, 192, 96, 0.3);
+  --eve-scrollbar-track: #0a120a;
+  --eve-scrollbar-thumb: #283a28;
+  --eve-scrollbar-thumb-hover: #405040;
+}
+
+/* Serpentis purple */
+[data-palette="serpentis"][data-mode="dark"] {
+  --eve-dark: 14 10 20;
+  --eve-panel: 24 18 30;
+  --eve-panel-hover: 34 26 42;
+  --eve-input: 28 22 34;
+  --eve-accent: 167 139 250;
+  --eve-accent-hover: 191 160 255;
+  --eve-accent-dim: 124 92 192;
+  --eve-text: 192 184 208;
+  --eve-dim: 122 106 138;
+  --eve-success: 0 180 80;
+  --eve-error: 220 60 60;
+  --eve-warning: 230 149 0;
+  --eve-border: 34 26 42;
+  --eve-border-light: 50 40 56;
+  --eve-glow: rgba(167, 139, 250, 0.15);
+  --eve-selection: rgba(167, 139, 250, 0.3);
+  --eve-scrollbar-track: #0e0a14;
+  --eve-scrollbar-thumb: #322838;
+  --eve-scrollbar-thumb-hover: #483e58;
+}
+
+/* ---------- LIGHT palettes ---------- */
+
+[data-palette="classic"][data-mode="light"] {
+  --eve-dark: 245 245 240;
+  --eve-panel: 255 255 255;
+  --eve-panel-hover: 240 240 235;
+  --eve-input: 248 248 245;
+  --eve-accent: 192 120 0;
+  --eve-accent-hover: 160 101 0;
+  --eve-accent-dim: 138 88 0;
+  --eve-text: 42 42 42;
+  --eve-dim: 106 106 106;
+  --eve-success: 0 138 58;
+  --eve-error: 192 32 32;
+  --eve-warning: 192 120 0;
+  --eve-border: 216 216 208;
+  --eve-border-light: 200 200 192;
+  --eve-glow: rgba(192, 120, 0, 0.1);
+  --eve-selection: rgba(192, 120, 0, 0.2);
+  --eve-scrollbar-track: #f0f0eb;
+  --eve-scrollbar-thumb: #c8c8c0;
+  --eve-scrollbar-thumb-hover: #a0a098;
+}
+
+[data-palette="caldari"][data-mode="light"] {
+  --eve-dark: 240 244 248;
+  --eve-panel: 255 255 255;
+  --eve-panel-hover: 232 240 248;
+  --eve-input: 240 246 252;
+  --eve-accent: 26 110 192;
+  --eve-accent-hover: 10 90 160;
+  --eve-accent-dim: 24 96 168;
+  --eve-text: 26 42 58;
+  --eve-dim: 90 106 122;
+  --eve-success: 0 138 58;
+  --eve-error: 192 32 32;
+  --eve-warning: 192 120 0;
+  --eve-border: 200 216 232;
+  --eve-border-light: 176 192 208;
+  --eve-glow: rgba(26, 110, 192, 0.1);
+  --eve-selection: rgba(26, 110, 192, 0.2);
+  --eve-scrollbar-track: #f0f4f8;
+  --eve-scrollbar-thumb: #b0c0d0;
+  --eve-scrollbar-thumb-hover: #8a9ab0;
+}
+
+[data-palette="amarr"][data-mode="light"] {
+  --eve-dark: 248 245 240;
+  --eve-panel: 255 254 248;
+  --eve-panel-hover: 245 240 232;
+  --eve-input: 250 248 240;
+  --eve-accent: 160 128 0;
+  --eve-accent-hover: 136 106 0;
+  --eve-accent-dim: 122 98 0;
+  --eve-text: 42 40 24;
+  --eve-dim: 106 100 80;
+  --eve-success: 0 138 58;
+  --eve-error: 192 32 32;
+  --eve-warning: 192 120 0;
+  --eve-border: 224 216 192;
+  --eve-border-light: 208 200 168;
+  --eve-glow: rgba(160, 128, 0, 0.1);
+  --eve-selection: rgba(160, 128, 0, 0.2);
+  --eve-scrollbar-track: #f8f5f0;
+  --eve-scrollbar-thumb: #d0c8a8;
+  --eve-scrollbar-thumb-hover: #b0a888;
+}
+
+[data-palette="minmatar"][data-mode="light"] {
+  --eve-dark: 248 242 240;
+  --eve-panel: 255 250 248;
+  --eve-panel-hover: 245 236 232;
+  --eve-input: 250 245 242;
+  --eve-accent: 184 48 32;
+  --eve-accent-hover: 160 40 24;
+  --eve-accent-dim: 136 32 24;
+  --eve-text: 42 24 24;
+  --eve-dim: 122 90 90;
+  --eve-success: 0 138 58;
+  --eve-error: 192 32 32;
+  --eve-warning: 192 120 0;
+  --eve-border: 224 200 200;
+  --eve-border-light: 208 176 176;
+  --eve-glow: rgba(184, 48, 32, 0.1);
+  --eve-selection: rgba(184, 48, 32, 0.2);
+  --eve-scrollbar-track: #f8f2f0;
+  --eve-scrollbar-thumb: #d0b0b0;
+  --eve-scrollbar-thumb-hover: #b09090;
+}
+
+[data-palette="gallente"][data-mode="light"] {
+  --eve-dark: 240 248 240;
+  --eve-panel: 248 255 248;
+  --eve-panel-hover: 232 245 232;
+  --eve-input: 242 250 242;
+  --eve-accent: 26 138 58;
+  --eve-accent-hover: 16 112 40;
+  --eve-accent-dim: 10 96 32;
+  --eve-text: 26 42 26;
+  --eve-dim: 90 122 90;
+  --eve-success: 26 138 58;
+  --eve-error: 192 32 32;
+  --eve-warning: 192 120 0;
+  --eve-border: 192 216 192;
+  --eve-border-light: 168 200 168;
+  --eve-glow: rgba(26, 138, 58, 0.1);
+  --eve-selection: rgba(26, 138, 58, 0.2);
+  --eve-scrollbar-track: #f0f8f0;
+  --eve-scrollbar-thumb: #a8c8a8;
+  --eve-scrollbar-thumb-hover: #88a888;
+}
+
+[data-palette="serpentis"][data-mode="light"] {
+  --eve-dark: 244 240 248;
+  --eve-panel: 250 248 255;
+  --eve-panel-hover: 239 232 245;
+  --eve-input: 245 242 250;
+  --eve-accent: 124 92 192;
+  --eve-accent-hover: 106 72 168;
+  --eve-accent-dim: 90 60 144;
+  --eve-text: 30 24 42;
+  --eve-dim: 106 90 122;
+  --eve-success: 0 138 58;
+  --eve-error: 192 32 32;
+  --eve-warning: 192 120 0;
+  --eve-border: 208 200 224;
+  --eve-border-light: 192 176 208;
+  --eve-glow: rgba(124, 92, 192, 0.1);
+  --eve-selection: rgba(124, 92, 192, 0.2);
+  --eve-scrollbar-track: #f4f0f8;
+  --eve-scrollbar-thumb: #c0b0d0;
+  --eve-scrollbar-thumb-hover: #a090b0;
+}
+
+/* ===================================================================
+   Base layer
+   =================================================================== */
+
 @layer base {
   * {
-    @apply border-eve-border;
+    border-color: rgb(var(--eve-border));
   }
 
   body {
-    @apply bg-eve-dark text-eve-text font-eve text-sm antialiased;
+    background-color: rgb(var(--eve-dark));
+    color: rgb(var(--eve-text));
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, Monaco, monospace;
+    font-size: 0.875rem;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     overflow: hidden;
   }
 
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #0d0d0d;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #3a3a3a;
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #555;
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--eve-scrollbar-track); }
+  ::-webkit-scrollbar-thumb { background: var(--eve-scrollbar-thumb); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--eve-scrollbar-thumb-hover); }
+
+  ::selection {
+    background: var(--eve-selection);
+    color: inherit;
   }
 
-  /* Selection */
-  ::selection {
-    background: rgba(230, 149, 0, 0.3);
-    color: #fff;
+  /* Prevent double-tap zoom on interactive elements (mobile) */
+  button, a, [role="tab"], input, select {
+    touch-action: manipulation;
   }
+}
+
+/* ===================================================================
+   Responsive utilities
+   =================================================================== */
+
+/* Table scroll container: smooth momentum + edge shadow indicators */
+.table-scroll-wrapper {
+  position: relative;
+}
+
+.table-scroll-container {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Gradient fade on right edge to hint horizontal scroll */
+.table-scroll-wrapper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, rgb(var(--eve-panel)));
+  opacity: 0.8;
+  z-index: 5;
+}
+
+/* Safe area insets for notched phones */
+@supports (padding: env(safe-area-inset-bottom)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Wider touch scrollbars on mobile */
+@media (pointer: coarse) {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { min-height: 40px; }
 }

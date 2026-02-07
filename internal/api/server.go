@@ -12,6 +12,7 @@ import (
 
 	"eve-flipper/internal/auth"
 	"eve-flipper/internal/config"
+	"eve-flipper/internal/corp"
 	"eve-flipper/internal/db"
 	"eve-flipper/internal/engine"
 	"eve-flipper/internal/esi"
@@ -42,6 +43,15 @@ type Server struct {
 	txnCacheMu   sync.RWMutex
 	txnCache     []esi.WalletTransaction
 	txnCacheTime time.Time
+
+	// PLEX dashboard cache (TTL 5 min) to avoid hammering ESI with 5 concurrent requests per click.
+	plexCacheMu   sync.RWMutex
+	plexCache     *engine.PLEXDashboard
+	plexCacheTime time.Time
+	plexCacheKey  string // "salesTax_brokerFee_nesE_nesM_nesO"
+
+	// Corporation demo provider (initialized on SDE load).
+	demoCorpProvider *corp.DemoCorpProvider
 }
 
 // ssoStateEntry holds metadata for a pending SSO login flow.
@@ -74,6 +84,9 @@ func (s *Server) SetSDE(data *sde.Data) {
 
 	// Initialize demand analyzer with region names from SDE
 	s.demandAnalyzer = zkillboard.NewDemandAnalyzer(data.RegionNames())
+
+	// Initialize corporation demo provider
+	s.demoCorpProvider = corp.NewDemoCorpProvider()
 
 	s.ready = true
 }
@@ -130,6 +143,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/demand/opportunities/{regionID}", s.handleDemandOpportunities)
 	mux.HandleFunc("GET /api/demand/fittings/{regionID}", s.handleDemandFittings)
 	mux.HandleFunc("POST /api/demand/refresh", s.handleDemandRefresh)
+	// PLEX+
+	mux.HandleFunc("GET /api/plex/dashboard", s.handlePLEXDashboard)
+	// Corporation
+	mux.HandleFunc("GET /api/auth/roles", s.handleAuthRoles)
+	mux.HandleFunc("GET /api/corp/dashboard", s.handleCorpDashboard)
+	mux.HandleFunc("GET /api/corp/members", s.handleCorpMembers)
+	mux.HandleFunc("GET /api/corp/wallets", s.handleCorpWallets)
+	mux.HandleFunc("GET /api/corp/journal", s.handleCorpJournal)
+	mux.HandleFunc("GET /api/corp/orders", s.handleCorpOrders)
+	mux.HandleFunc("GET /api/corp/industry", s.handleCorpIndustry)
+	mux.HandleFunc("GET /api/corp/mining", s.handleCorpMining)
 	return corsMiddleware(mux)
 }
 
@@ -2354,4 +2378,333 @@ func (s *Server) handleDemandRefresh(w http.ResponseWriter, r *http.Request) {
 	})
 	fmt.Fprintf(w, "%s\n", line)
 	flusher.Flush()
+}
+
+// --- PLEX+ ---
+
+func (s *Server) handlePLEXDashboard(w http.ResponseWriter, r *http.Request) {
+	if !s.isReady() {
+		writeError(w, 503, "SDE not loaded yet")
+		return
+	}
+
+	q := r.URL.Query()
+	salesTax := 3.6
+	brokerFee := 1.0
+	if v, err := strconv.ParseFloat(q.Get("sales_tax"), 64); err == nil && v >= 0 && v <= 100 {
+		salesTax = v
+	}
+	if v, err := strconv.ParseFloat(q.Get("broker_fee"), 64); err == nil && v >= 0 && v <= 100 {
+		brokerFee = v
+	}
+
+	// NES PLEX prices — user-overridable, 0 = use default
+	var nes engine.NESPrices
+	if v, err := strconv.Atoi(q.Get("nes_extractor")); err == nil && v > 0 {
+		nes.ExtractorPLEX = v
+	}
+	if v, err := strconv.Atoi(q.Get("nes_mptc")); err == nil && v > 0 {
+		nes.MPTCPLEX = v
+	}
+	if v, err := strconv.Atoi(q.Get("nes_omega")); err == nil && v > 0 {
+		nes.OmegaPLEX = v
+	}
+
+	log.Printf("[API] PLEX Dashboard: salesTax=%.1f, brokerFee=%.1f, nes=%+v", salesTax, brokerFee, nes)
+
+	// Check cache (5 min TTL, keyed by user params)
+	cacheKey := fmt.Sprintf("%.2f_%.2f_%d_%d_%d", salesTax, brokerFee, nes.ExtractorPLEX, nes.MPTCPLEX, nes.OmegaPLEX)
+	s.plexCacheMu.RLock()
+	if s.plexCache != nil && s.plexCacheKey == cacheKey && time.Since(s.plexCacheTime) < 5*time.Minute {
+		cached := s.plexCache
+		s.plexCacheMu.RUnlock()
+		log.Printf("[PLEX] Serving from cache (age: %v)", time.Since(s.plexCacheTime).Round(time.Second))
+		writeJSON(w, cached)
+		return
+	}
+	s.plexCacheMu.RUnlock()
+
+	// All fetches run in parallel:
+	// 1. PLEX orders from Global PLEX Market (region 19000001)
+	// 2. Related items (Extractor, Injector, MPTC) from Jita
+	// 3. PLEX price history from Global PLEX Market
+
+	type ordersResult struct {
+		orders []esi.MarketOrder
+		err    error
+	}
+	plexCh := make(chan ordersResult, 1)
+	go func() {
+		orders, err := s.esi.FetchRegionOrdersByType(engine.GlobalPLEXRegionID, engine.PLEXTypeID)
+		plexCh <- ordersResult{orders, err}
+	}()
+
+	relatedTypes := []int32{engine.SkillExtractorTypeID, engine.LargeSkillInjTypeID, engine.MPTCTypeID}
+	type typeResult struct {
+		typeID int32
+		orders []esi.MarketOrder
+	}
+	relCh := make(chan typeResult, len(relatedTypes))
+	for _, tid := range relatedTypes {
+		go func(t int32) {
+			orders, err := s.esi.FetchRegionOrdersByType(engine.JitaRegionID, t)
+			if err != nil {
+				log.Printf("[PLEX] Failed to fetch type %d orders: %v", t, err)
+				relCh <- typeResult{t, nil}
+				return
+			}
+			relCh <- typeResult{t, orders}
+		}(tid)
+	}
+
+	type histResult struct {
+		entries []esi.HistoryEntry
+		err     error
+	}
+	histCh := make(chan histResult, 1)
+	go func() {
+		entries, err := s.esi.FetchMarketHistory(engine.GlobalPLEXRegionID, engine.PLEXTypeID)
+		histCh <- histResult{entries, err}
+	}()
+
+	// Collect results
+	plexRes := <-plexCh
+	if plexRes.err != nil {
+		log.Printf("[PLEX] Failed to fetch global PLEX orders: %v", plexRes.err)
+	}
+
+	relatedOrders := make(map[int32][]esi.MarketOrder)
+	for range relatedTypes {
+		res := <-relCh
+		if res.orders != nil {
+			relatedOrders[res.typeID] = res.orders
+		}
+	}
+
+	histRes := <-histCh
+	history := histRes.entries
+	if histRes.err != nil {
+		log.Printf("[PLEX] Failed to fetch history: %v", histRes.err)
+	}
+
+	log.Printf("[PLEX] Global orders: %d, history: %d, related types: %d",
+		len(plexRes.orders), len(history), len(relatedOrders))
+
+	dashboard := engine.ComputePLEXDashboard(plexRes.orders, relatedOrders, history, salesTax, brokerFee, nes)
+
+	// Store in cache
+	s.plexCacheMu.Lock()
+	s.plexCache = &dashboard
+	s.plexCacheTime = time.Now()
+	s.plexCacheKey = cacheKey
+	s.plexCacheMu.Unlock()
+
+	writeJSON(w, dashboard)
+}
+
+// ============================================================
+// Corporation Handlers
+// ============================================================
+
+// handleAuthRoles returns the character's corporation roles and director status.
+func (s *Server) handleAuthRoles(w http.ResponseWriter, r *http.Request) {
+	token, err := s.sessions.EnsureValidToken(s.sso)
+	if err != nil {
+		writeError(w, 401, err.Error())
+		return
+	}
+	sess := s.sessions.Get()
+	if sess == nil {
+		writeError(w, 401, "not logged in")
+		return
+	}
+
+	// Fetch roles and corp ID in parallel
+	var roles *esi.CharacterRolesResponse
+	var corpID int32
+	var rolesErr, corpErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		roles, rolesErr = s.esi.GetCharacterRoles(sess.CharacterID, token)
+	}()
+	go func() {
+		defer wg.Done()
+		corpID, corpErr = s.esi.GetCharacterCorporationID(sess.CharacterID)
+	}()
+	wg.Wait()
+
+	result := corp.CharacterRoles{
+		CorporationID: corpID,
+	}
+
+	if rolesErr == nil && roles != nil {
+		result.Roles = roles.Roles
+		for _, role := range roles.Roles {
+			if role == "Director" || role == "CEO" {
+				result.IsDirector = true
+				break
+			}
+		}
+	}
+	if corpErr != nil {
+		log.Printf("[CORP] Failed to fetch corp ID: %v", corpErr)
+	}
+
+	writeJSON(w, result)
+}
+
+// corpProvider returns the appropriate CorpDataProvider based on the ?mode= query param.
+func (s *Server) corpProvider(r *http.Request) (corp.CorpDataProvider, error) {
+	mode := r.URL.Query().Get("mode")
+	if mode == "live" {
+		token, err := s.sessions.EnsureValidToken(s.sso)
+		if err != nil {
+			return nil, fmt.Errorf("not logged in: %w", err)
+		}
+		sess := s.sessions.Get()
+		if sess == nil {
+			return nil, fmt.Errorf("not logged in")
+		}
+		corpID, err := s.esi.GetCharacterCorporationID(sess.CharacterID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve corporation: %w", err)
+		}
+		s.mu.RLock()
+		sdeData := s.sdeData
+		s.mu.RUnlock()
+		return corp.NewESICorpProvider(s.esi, sdeData, token, corpID, sess.CharacterID), nil
+	}
+	// Default: demo mode
+	if s.demoCorpProvider == nil {
+		return nil, fmt.Errorf("demo data not ready (SDE still loading)")
+	}
+	return s.demoCorpProvider, nil
+}
+
+func (s *Server) handleCorpDashboard(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	dashboard, err := corp.BuildDashboard(provider)
+	if err != nil {
+		writeError(w, 500, fmt.Sprintf("dashboard build failed: %v", err))
+		return
+	}
+
+	writeJSON(w, dashboard)
+}
+
+func (s *Server) handleCorpMembers(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	members, err := provider.GetMembers()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, members)
+}
+
+func (s *Server) handleCorpWallets(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	wallets, err := provider.GetWallets()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, wallets)
+}
+
+func (s *Server) handleCorpJournal(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	division := 1
+	if d := r.URL.Query().Get("division"); d != "" {
+		if v, err := strconv.Atoi(d); err == nil && v >= 1 && v <= 7 {
+			division = v
+		}
+	}
+	days := 90
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := strconv.Atoi(d); err == nil && v > 0 {
+			days = v
+		}
+	}
+
+	journal, err := provider.GetJournal(division, days)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, journal)
+}
+
+func (s *Server) handleCorpOrders(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	orders, err := provider.GetOrders()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, orders)
+}
+
+func (s *Server) handleCorpIndustry(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	jobs, err := provider.GetIndustryJobs()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, jobs)
+}
+
+func (s *Server) handleCorpMining(w http.ResponseWriter, r *http.Request) {
+	provider, err := s.corpProvider(r)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+
+	entries, err := provider.GetMiningLedger()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	writeJSON(w, entries)
 }

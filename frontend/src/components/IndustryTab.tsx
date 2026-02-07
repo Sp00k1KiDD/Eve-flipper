@@ -227,6 +227,7 @@ export function IndustryTab({ onError, isLoggedIn = false }: Props) {
           hint={t("industrySettingsHint")}
           icon="🏭"
           defaultExpanded={true}
+          persistKey="industry"
           help={{ stepKeys: ["helpIndustryStep1", "helpIndustryStep2", "helpIndustryStep3"], wikiSlug: "Industry-Chain-Optimizer" }}
         >
           {/* Item Search */}
@@ -548,7 +549,7 @@ function TreeNode({ node, level = 0 }: { node: MaterialNode; level?: number }) {
         className={`flex items-center py-1 px-2 hover:bg-eve-accent/5 rounded-sm ${
           node.should_build ? "" : "opacity-70"
         }`}
-        style={{ paddingLeft: indent + 8 }}
+        style={{ paddingLeft: Math.min(indent + 8, 120) }}
       >
         {/* Expand/Collapse Toggle */}
         {hasChildren ? (
@@ -648,7 +649,7 @@ function ShoppingList({
             <tr
               key={m.type_id}
               className={`border-b border-eve-border/50 hover:bg-eve-accent/5 ${
-                i % 2 === 0 ? "bg-eve-panel" : "bg-[#161616]"
+                i % 2 === 0 ? "bg-eve-panel" : "bg-eve-dark"
               }`}
             >
               <td className="px-1 py-1.5 text-center">
