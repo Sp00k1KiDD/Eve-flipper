@@ -32,8 +32,11 @@ type Server struct {
 	sessions         *auth.SessionStore
 	mu               sync.RWMutex
 	ready            bool
-	ssoState         string // CSRF state for current login flow
-	ssoDesktop       bool   // true when login was initiated from the desktop (Tauri) app
+
+	// SSO state: map of CSRF state tokens → (expiry, desktop flag).
+	// Supports concurrent login flows from multiple tabs.
+	ssoStatesMu sync.Mutex
+	ssoStates   map[string]ssoStateEntry
 
 	// Wallet transaction cache for P&L tab (TTL 2 min).
 	txnCacheMu   sync.RWMutex
@@ -41,14 +44,21 @@ type Server struct {
 	txnCacheTime time.Time
 }
 
+// ssoStateEntry holds metadata for a pending SSO login flow.
+type ssoStateEntry struct {
+	ExpiresAt time.Time
+	Desktop   bool
+}
+
 // NewServer creates a Server with the given config, ESI client, and database.
 func NewServer(cfg *config.Config, esiClient *esi.Client, database *db.DB, ssoConfig *auth.SSOConfig, sessions *auth.SessionStore) *Server {
 	return &Server{
-		cfg:      cfg,
-		esi:      esiClient,
-		db:       database,
-		sso:      ssoConfig,
-		sessions: sessions,
+		cfg:       cfg,
+		esi:       esiClient,
+		db:        database,
+		sso:       ssoConfig,
+		sessions:  sessions,
+		ssoStates: make(map[string]ssoStateEntry),
 	}
 }
 
@@ -106,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/location", s.handleAuthLocation)
 	mux.HandleFunc("GET /api/auth/undercuts", s.handleAuthUndercuts)
 	mux.HandleFunc("GET /api/auth/portfolio", s.handleAuthPortfolio)
+	mux.HandleFunc("GET /api/auth/portfolio/optimize", s.handleAuthPortfolioOptimize)
 	// Industry
 	mux.HandleFunc("POST /api/industry/analyze", s.handleIndustryAnalyze)
 	mux.HandleFunc("GET /api/industry/search", s.handleIndustrySearch)
@@ -207,6 +218,36 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if v, ok := patch["opacity"]; ok {
 		json.Unmarshal(v, &s.cfg.Opacity)
+	}
+
+	// Validate bounds
+	if s.cfg.CargoCapacity < 0 {
+		s.cfg.CargoCapacity = 0
+	}
+	if s.cfg.BuyRadius < 0 {
+		s.cfg.BuyRadius = 0
+	} else if s.cfg.BuyRadius > 50 {
+		s.cfg.BuyRadius = 50
+	}
+	if s.cfg.SellRadius < 0 {
+		s.cfg.SellRadius = 0
+	} else if s.cfg.SellRadius > 50 {
+		s.cfg.SellRadius = 50
+	}
+	if s.cfg.MinMargin < 0 {
+		s.cfg.MinMargin = 0
+	} else if s.cfg.MinMargin > 100 {
+		s.cfg.MinMargin = 100
+	}
+	if s.cfg.SalesTaxPercent < 0 {
+		s.cfg.SalesTaxPercent = 0
+	} else if s.cfg.SalesTaxPercent > 100 {
+		s.cfg.SalesTaxPercent = 100
+	}
+	if s.cfg.Opacity < 0 {
+		s.cfg.Opacity = 0
+	} else if s.cfg.Opacity > 100 {
+		s.cfg.Opacity = 100
 	}
 
 	s.db.SaveConfig(s.cfg)
@@ -333,13 +374,13 @@ func (s *Server) parseScanParams(req scanRequest) (engine.ScanParams, error) {
 	}
 
 	return engine.ScanParams{
-		CurrentSystemID:  systemID,
-		CargoCapacity:    req.CargoCapacity,
-		BuyRadius:        req.BuyRadius,
-		SellRadius:       req.SellRadius,
-		MinMargin:        req.MinMargin,
-		SalesTaxPercent:  req.SalesTaxPercent,
-		BrokerFeePercent: req.BrokerFeePercent,
+		CurrentSystemID:   systemID,
+		CargoCapacity:     req.CargoCapacity,
+		BuyRadius:         req.BuyRadius,
+		SellRadius:        req.SellRadius,
+		MinMargin:         req.MinMargin,
+		SalesTaxPercent:   req.SalesTaxPercent,
+		BrokerFeePercent:  req.BrokerFeePercent,
 		MinDailyVolume:    req.MinDailyVolume,
 		MaxInvestment:     req.MaxInvestment,
 		MinRouteSecurity:  req.MinRouteSecurity,
@@ -993,7 +1034,7 @@ func (s *Server) handleExecutionPlan(w http.ResponseWriter, r *http.Request) {
 
 	result := engine.ComputeExecutionPlan(filtered, req.Quantity, req.IsBuy)
 
-	// When market history is available, add impact calibration (Kyle's λ, √V, TWAP n*)
+	// When market history is available, add impact calibration (Amihud, σ, TWAP slices)
 	if s.db != nil {
 		history, ok := s.db.GetMarketHistory(req.RegionID, req.TypeID)
 		if !ok {
@@ -1013,7 +1054,9 @@ func (s *Server) handleExecutionPlan(w http.ResponseWriter, r *http.Request) {
 			}
 			params := engine.CalibrateImpact(history, impactDays)
 			if params.Valid {
-				est := engine.EstimateImpact(params, float64(req.Quantity), engine.DefaultTWAPHorizonDays)
+				// Use best price from execution plan as reference for ISK conversion
+				refPrice := result.BestPrice
+				est := engine.EstimateImpact(params, float64(req.Quantity), refPrice)
 				result.Impact = &est
 			}
 		}
@@ -1123,10 +1166,21 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	state := auth.GenerateState()
 	desktop := r.URL.Query().Get("desktop") == "1"
-	s.mu.Lock()
-	s.ssoState = state
-	s.ssoDesktop = desktop
-	s.mu.Unlock()
+
+	s.ssoStatesMu.Lock()
+	// Purge expired states
+	now := time.Now()
+	for k, v := range s.ssoStates {
+		if now.After(v.ExpiresAt) {
+			delete(s.ssoStates, k)
+		}
+	}
+	s.ssoStates[state] = ssoStateEntry{
+		ExpiresAt: now.Add(10 * time.Minute),
+		Desktop:   desktop,
+	}
+	s.ssoStatesMu.Unlock()
+
 	http.Redirect(w, r, s.sso.BuildAuthURL(state), http.StatusTemporaryRedirect)
 }
 
@@ -1139,12 +1193,15 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 
-	s.mu.RLock()
-	expectedState := s.ssoState
-	s.mu.RUnlock()
+	s.ssoStatesMu.Lock()
+	entry, ok := s.ssoStates[state]
+	if ok {
+		delete(s.ssoStates, state) // consume: one-time use
+	}
+	s.ssoStatesMu.Unlock()
 
-	if state == "" || state != expectedState {
-		writeError(w, 400, "invalid state parameter")
+	if state == "" || !ok || time.Now().After(entry.ExpiresAt) {
+		writeError(w, 400, "invalid or expired state parameter")
 		return
 	}
 
@@ -1181,11 +1238,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[AUTH] Logged in as %s (ID: %d)", info.CharacterName, info.CharacterID)
 
 	// Check whether the login was initiated from the desktop (Tauri) app.
-	s.mu.RLock()
-	desktop := s.ssoDesktop
-	s.mu.RUnlock()
-
-	if !desktop {
+	if !entry.Desktop {
 		// Web browser: redirect back to the frontend (original behaviour).
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
@@ -1562,6 +1615,79 @@ func (s *Server) handleAuthPortfolio(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := engine.ComputePortfolioPnL(txns, days)
+	writeJSON(w, result)
+}
+
+func (s *Server) handleAuthPortfolioOptimize(w http.ResponseWriter, r *http.Request) {
+	token, err := s.sessions.EnsureValidToken(s.sso)
+	if err != nil {
+		writeError(w, 401, err.Error())
+		return
+	}
+	sess := s.sessions.Get()
+	if sess == nil {
+		writeError(w, 401, "not logged in")
+		return
+	}
+
+	daysStr := r.URL.Query().Get("days")
+	days := 90
+	if daysStr != "" {
+		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
+			days = d
+		}
+	}
+
+	// Use cached wallet transactions (TTL 2 min) to avoid hammering ESI.
+	s.txnCacheMu.RLock()
+	cached := s.txnCache
+	cacheAge := time.Since(s.txnCacheTime)
+	s.txnCacheMu.RUnlock()
+
+	var txns []esi.WalletTransaction
+	if cached != nil && cacheAge < 2*time.Minute {
+		txns = cached
+	} else {
+		freshTxns, fetchErr := s.esi.GetWalletTransactions(sess.CharacterID, token)
+		if fetchErr != nil {
+			writeError(w, 500, "failed to fetch transactions: "+fetchErr.Error())
+			return
+		}
+
+		// Enrich type names from SDE
+		s.mu.RLock()
+		sdeData := s.sdeData
+		s.mu.RUnlock()
+
+		if sdeData != nil {
+			for i := range freshTxns {
+				if t, ok := sdeData.Types[freshTxns[i].TypeID]; ok {
+					freshTxns[i].TypeName = t.Name
+				}
+			}
+		}
+
+		// Store in cache
+		s.txnCacheMu.Lock()
+		s.txnCache = freshTxns
+		s.txnCacheTime = time.Now()
+		s.txnCacheMu.Unlock()
+
+		txns = freshTxns
+	}
+
+	result, diag := engine.ComputePortfolioOptimization(txns, days)
+	if result == nil {
+		// Return diagnostic info as JSON so the frontend can show details.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error":      "not enough trading data for optimization",
+			"diagnostic": diag,
+		})
+		return
+	}
+
 	writeJSON(w, result)
 }
 

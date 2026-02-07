@@ -35,18 +35,18 @@ type HistoryProvider interface {
 
 // Scanner orchestrates market scans using SDE data and the ESI client.
 type Scanner struct {
-	SDE            *sde.Data
-	ESI            *esi.Client
-	History        HistoryProvider
-	ContractsCache      *esi.ContractsCache      // Cache for contracts (5 min TTL)
-	ContractItemsCache  *esi.ContractItemsCache  // Cache for contract items (immutable)
+	SDE                *sde.Data
+	ESI                *esi.Client
+	History            HistoryProvider
+	ContractsCache     *esi.ContractsCache     // Cache for contracts (5 min TTL)
+	ContractItemsCache *esi.ContractItemsCache // Cache for contract items (immutable)
 }
 
 // NewScanner creates a Scanner with the given static data and ESI client.
 func NewScanner(data *sde.Data, client *esi.Client) *Scanner {
 	return &Scanner{
-		SDE:            data,
-		ESI:            client,
+		SDE:                data,
+		ESI:                client,
 		ContractsCache:     esi.NewContractsCache(),
 		ContractItemsCache: esi.NewContractItemsCache(),
 	}
@@ -333,7 +333,7 @@ func (s *Scanner) calculateResults(
 	if taxMult < 0 {
 		taxMult = 0
 	}
-	brokerMult := params.BrokerFeePercent / 100 // 0 for instant trades
+	brokerFeeRate := params.BrokerFeePercent / 100 // 0 for instant trades; fraction e.g. 0.03 for 3%
 
 	var results []FlipResult
 
@@ -345,8 +345,8 @@ func (s *Scanner) calculateResults(
 
 		// OPT: early margin check before item lookup
 		// Broker fee applies to both sides when placing limit orders (0 for instant trades)
-		effectiveBuyPrice := sell.Price * (1 + brokerMult)
-		effectiveSellPrice := buy.Price * taxMult * (1 - brokerMult)
+		effectiveBuyPrice := sell.Price * (1 + brokerFeeRate)
+		effectiveSellPrice := buy.Price * taxMult * (1 - brokerFeeRate)
 		profitPerUnit := effectiveSellPrice - effectiveBuyPrice
 		if profitPerUnit <= 0 {
 			continue
@@ -387,7 +387,7 @@ func (s *Scanner) calculateResults(
 
 		totalProfit := profitPerUnit * float64(units)
 
-		// OPT: use BFS distances when available, fallback to Dijkstra (with optional route security filter)
+		// OPT: use pre-computed BFS distances when available, fallback to on-demand BFS (with optional route security filter)
 		minSec := params.MinRouteSecurity
 		buyJumps := s.jumpsBetweenWithBFS(params.CurrentSystemID, sell.SystemID, bfsDistances, minSec)
 		sellJumps := s.jumpsBetweenWithSecurity(sell.SystemID, buy.SystemID, minSec)
@@ -479,8 +479,8 @@ func (s *Scanner) calculateResults(
 			r.SlippageBuyPct = planBuy.SlippagePercent
 			r.SlippageSellPct = planSell.SlippagePercent
 			if r.ExpectedBuyPrice > 0 && r.ExpectedSellPrice > 0 {
-				effBuy := r.ExpectedBuyPrice * (1 + brokerMult)
-				effSell := r.ExpectedSellPrice * taxMult * (1 - brokerMult)
+				effBuy := r.ExpectedBuyPrice * (1 + brokerFeeRate)
+				effSell := r.ExpectedSellPrice * taxMult * (1 - brokerFeeRate)
 				r.ExpectedProfit = (effSell - effBuy) * float64(r.UnitsToBuy)
 			}
 		}
@@ -520,11 +520,15 @@ func (s *Scanner) calculateResults(
 	// Enrich with market history (volume, velocity, trend)
 	s.enrichWithHistory(results, progress)
 
-	// Compute DailyProfit = ProfitPerUnit * min(UnitsToBuy, DailyVolume)
+	// Compute DailyProfit = ProfitPerUnit * min(UnitsToBuy, estimatedDailyShare).
+	// Uses harmonic distribution: top-of-book gets more volume than deeper positions.
 	for i := range results {
 		sellablePerDay := int64(results[i].UnitsToBuy)
-		if results[i].DailyVolume > 0 && results[i].DailyVolume < sellablePerDay {
-			sellablePerDay = results[i].DailyVolume
+		if results[i].DailyVolume > 0 {
+			dailyShare := harmonicDailyShare(results[i].DailyVolume, results[i].SellCompetitors)
+			if dailyShare < sellablePerDay {
+				sellablePerDay = dailyShare
+			}
 		}
 		results[i].DailyProfit = results[i].ProfitPerUnit * float64(sellablePerDay)
 	}
@@ -579,6 +583,38 @@ func (s *Scanner) jumpsBetweenWithBFS(from, to int32, bfsDistances map[int32]int
 		return d
 	}
 	return s.jumpsBetweenWithSecurity(from, to, minRouteSecurity)
+}
+
+// harmonicDailyShare estimates a player's share of daily volume using a harmonic
+// distribution model. In real markets, top-of-book orders fill disproportionately
+// faster than deeper positions. The harmonic model assigns share proportional to
+// 1/position: position 1 gets 1/H(n), position 2 gets (1/2)/H(n), etc.
+// where H(n) = 1 + 1/2 + ... + 1/n is the n-th harmonic number.
+//
+// A new player entering the market is conservatively placed at the median position
+// ceil(n/2). This gives a more realistic (and usually more conservative) estimate
+// than the naïve uniform model dailyVolume/(competitors+1).
+func harmonicDailyShare(dailyVolume int64, competitors int) int64 {
+	if dailyVolume <= 0 {
+		return 0
+	}
+	if competitors <= 0 {
+		return dailyVolume
+	}
+	n := competitors + 1 // total participants including the player
+	// Harmonic number H(n) = Σ(1/k) for k=1..n
+	hn := 0.0
+	for k := 1; k <= n; k++ {
+		hn += 1.0 / float64(k)
+	}
+	// Player at median position
+	position := (n + 1) / 2 // ceil(n/2) via integer division
+	share := float64(dailyVolume) * (1.0 / float64(position)) / hn
+	result := int64(math.Round(share))
+	if result < 1 {
+		result = 1
+	}
+	return result
 }
 
 // sanitizeFloat replaces NaN/Inf with 0 to prevent JSON marshal errors.

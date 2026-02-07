@@ -29,12 +29,12 @@ type RegionHotZone struct {
 	RegionID      int32    `json:"region_id"`
 	RegionName    string   `json:"region_name"`
 	HotScore      float64  `json:"hot_score"`      // Current vs baseline ratio
-	Status        string   `json:"status"`          // "war", "conflict", "elevated", "normal"
-	KillsToday    int64    `json:"kills_today"`     // Average daily kills this month (not literal "today")
-	KillsBaseline int64    `json:"kills_baseline"`  // Average daily kills (baseline from prior months)
-	ISKDestroyed  float64  `json:"isk_destroyed"`   // Total ISK destroyed (all time)
-	ActivePlayers int      `json:"active_players"`  // Currently active PVP players
-	TopShips      []string `json:"top_ships"`       // Most destroyed ship types
+	Status        string   `json:"status"`         // "war", "conflict", "elevated", "normal"
+	KillsToday    int64    `json:"kills_today"`    // Average daily kills this month (not literal "today")
+	KillsBaseline int64    `json:"kills_baseline"` // Average daily kills (baseline from prior months)
+	ISKDestroyed  float64  `json:"isk_destroyed"`  // Total ISK destroyed (all time)
+	ActivePlayers int      `json:"active_players"` // Currently active PVP players
+	TopShips      []string `json:"top_ships"`      // Most destroyed ship types
 }
 
 // DemandItem represents an item with high demand due to kills.
@@ -233,7 +233,7 @@ func (d *DemandAnalyzer) analyzeRegion(regionID int32, stats *RegionStats) *Regi
 	now := time.Now()
 	currentKey := fmt.Sprintf("%d%02d", now.Year(), now.Month())
 
-	var baselineTotal int64
+	var baselineDailySum float64
 	var baselineMonths int
 
 	for key, month := range stats.Months {
@@ -247,7 +247,12 @@ func (d *DemandAnalyzer) analyzeRegion(regionID int32, stats *RegionStats) *Regi
 			continue
 		}
 
-		baselineTotal += month.ShipsDestroyed
+		// Use actual days in each month (28-31) instead of a fixed 30
+		daysInMonth := time.Date(month.Year, time.Month(month.Month)+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		if daysInMonth < 1 {
+			daysInMonth = 30
+		}
+		baselineDailySum += float64(month.ShipsDestroyed) / float64(daysInMonth)
 		baselineMonths++
 	}
 
@@ -255,8 +260,7 @@ func (d *DemandAnalyzer) analyzeRegion(regionID int32, stats *RegionStats) *Regi
 		baselineMonths = 1
 	}
 
-	baselineAvg := float64(baselineTotal) / float64(baselineMonths)
-	baselineDaily := baselineAvg / 30.0 // Average daily kills
+	baselineDaily := baselineDailySum / float64(baselineMonths)
 
 	// Get current month stats
 	var currentMonthKills int64

@@ -21,7 +21,7 @@ type HistoryEntry struct {
 type MarketStats struct {
 	DailyVolume int64   // average daily volume over last 7 days
 	Velocity    float64 // daily_volume / total_listed_quantity
-	PriceTrend  float64 // % change over last 7 days
+	PriceTrend  float64 // % change over last 7 days (Theil-Sen slope)
 }
 
 // HistoryCache is a persistent cache for market history data.
@@ -48,7 +48,7 @@ func ComputeMarketStats(entries []HistoryEntry, totalListed int32) MarketStats {
 		return MarketStats{}
 	}
 
-	// Sort entries by date to ensure correct first/last price for trend calculation.
+	// Sort entries by date to ensure correct chronological order.
 	// ESI does not guarantee chronological order.
 	sorted := make([]HistoryEntry, len(entries))
 	copy(sorted, entries)
@@ -61,18 +61,18 @@ func ComputeMarketStats(entries []HistoryEntry, totalListed int32) MarketStats {
 
 	var vol7 int64
 	var count7 int
-	var firstPrice, lastPrice float64
-	firstSet := false
+	// Collect prices with day-index for Theil-Sen regression.
+	var prices []float64
+	var dayIndices []float64
 
 	for _, e := range sorted {
 		if e.Date >= cutoff7 {
 			vol7 += e.Volume
 			count7++
-			if !firstSet {
-				firstPrice = e.Average
-				firstSet = true
+			if e.Average > 0 {
+				prices = append(prices, e.Average)
+				dayIndices = append(dayIndices, float64(len(prices)-1))
 			}
-			lastPrice = e.Average
 		}
 	}
 
@@ -88,9 +88,42 @@ func ComputeMarketStats(entries []HistoryEntry, totalListed int32) MarketStats {
 		velocity = float64(dailyVol) / float64(totalListed)
 	}
 
+	// Price trend: Theil-Sen median slope over 7-day window, expressed as % change.
+	// Theil-Sen is robust to outliers (up to ~29% breakdown point), unlike OLS
+	// which can be heavily influenced by a single spike or crash day.
+	// slope = median of all pairwise slopes (y_j - y_i) / (x_j - x_i), i < j
+	// trend% = slope * (N-1) / midPrice * 100
 	trend := 0.0
-	if firstPrice > 0 {
-		trend = (lastPrice - firstPrice) / firstPrice * 100
+	if len(prices) >= 2 {
+		n := len(prices)
+
+		// Compute all pairwise slopes.
+		slopes := make([]float64, 0, n*(n-1)/2)
+		for i := 0; i < n; i++ {
+			for j := i + 1; j < n; j++ {
+				dx := dayIndices[j] - dayIndices[i]
+				if dx > 0 {
+					slopes = append(slopes, (prices[j]-prices[i])/dx)
+				}
+			}
+		}
+
+		if len(slopes) > 0 {
+			sort.Float64s(slopes)
+			slope := medianSorted(slopes)
+
+			// Mid-price as mean of prices for normalization.
+			var sumP float64
+			for _, p := range prices {
+				sumP += p
+			}
+			midPrice := sumP / float64(n)
+
+			if midPrice > 0 {
+				// Total % change over the window: slope * (N-1) days / average price * 100
+				trend = slope * float64(n-1) / midPrice * 100
+			}
+		}
 	}
 
 	return MarketStats{
@@ -98,4 +131,16 @@ func ComputeMarketStats(entries []HistoryEntry, totalListed int32) MarketStats {
 		Velocity:    velocity,
 		PriceTrend:  trend,
 	}
+}
+
+// medianSorted returns the median of a pre-sorted slice.
+func medianSorted(s []float64) float64 {
+	n := len(s)
+	if n == 0 {
+		return 0
+	}
+	if n%2 == 1 {
+		return s[n/2]
+	}
+	return 0.5 * (s[n/2-1] + s[n/2])
 }

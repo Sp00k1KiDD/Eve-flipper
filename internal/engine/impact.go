@@ -9,14 +9,15 @@ import (
 
 // ImpactParams holds calibrated market impact parameters from history.
 type ImpactParams struct {
-	// Lambda (Kyle): linear impact ΔP = λ × Q. Units: ISK per unit volume.
-	Lambda float64 `json:"lambda"`
-	// Eta: square-root impact ΔP = η × √Q. Units: ISK × unit^(−0.5).
-	Eta float64 `json:"eta"`
-	// SigmaSq: variance of daily (log or simple) returns. Used in n* = √(σ² T / (2 λ κ)).
-	SigmaSq float64 `json:"sigma_sq"`
-	// Sigma: annualized or per-period volatility (sqrt of variance in same units as T).
+	// Amihud: illiquidity ratio = median( |log-return| / volume ).
+	// Units: fractional price change per unit. Higher = less liquid.
+	Amihud float64 `json:"amihud"`
+	// Sigma: daily volatility (sample std dev of log-returns).
 	Sigma float64 `json:"sigma"`
+	// SigmaSq: variance of daily log-returns.
+	SigmaSq float64 `json:"sigma_sq"`
+	// AvgDailyVolume: average daily trading volume over the calibration window.
+	AvgDailyVolume float64 `json:"avg_daily_volume"`
 	// DaysUsed is the number of history days used for calibration.
 	DaysUsed int `json:"days_used"`
 	// Valid is true if calibration succeeded (enough data).
@@ -25,71 +26,75 @@ type ImpactParams struct {
 
 // ImpactEstimate is the result of applying the impact model for a given quantity.
 type ImpactEstimate struct {
-	// LinearImpact: ΔP = λ × Q (ISK).
-	LinearImpact float64 `json:"linear_impact"`
-	// SqrtImpact: ΔP = η × √Q (ISK). Often more realistic for larger orders.
-	SqrtImpact float64 `json:"sqrt_impact"`
-	// Recommended: we use sqrt impact as default recommendation.
-	RecommendedImpact float64 `json:"recommended_impact"`
-	// OptimalSlicesTWAP: n* = √(σ² T / (2 λ κ)). Suggested number of slices for TWAP.
-	OptimalSlicesTWAP int `json:"optimal_slices_twap"`
+	// LinearImpactPct: Amihud linear estimate ΔP% = amihud × Q.
+	LinearImpactPct float64 `json:"linear_impact_pct"`
+	// SqrtImpactPct: square-root law ΔP% = σ × √(Q / V_daily).
+	// Standard model from Barra/Almgren: impact scales with sqrt of participation rate.
+	SqrtImpactPct float64 `json:"sqrt_impact_pct"`
+	// RecommendedImpactPct: best estimate of price impact in %.
+	RecommendedImpactPct float64 `json:"recommended_impact_pct"`
+	// RecommendedImpactISK: recommended impact in ISK (using reference price).
+	RecommendedImpactISK float64 `json:"recommended_impact_isk"`
+	// OptimalSlices: suggested number of slices for TWAP execution.
+	// Based on participation rate: each slice ≤ targetPct of daily volume.
+	OptimalSlices int `json:"optimal_slices"`
 	// Params used for this estimate.
 	Params ImpactParams `json:"params"`
 }
 
 const (
-	// DefaultImpactDays is the number of history days used for λ/η calibration.
+	// DefaultImpactDays is the number of history days used for calibration.
 	DefaultImpactDays = 30
-	// DefaultTWAPHorizonDays is T in the n* formula (time horizon for execution).
+	// DefaultTWAPHorizonDays is T in execution planning (kept for API compat).
 	DefaultTWAPHorizonDays = 1
-	// DefaultKappaRatio: κ = kappaRatio × λ (temporary impact cost in Almgren-Chriss style).
-	DefaultKappaRatio = 0.5
+	// DefaultTWAPTargetPct is the max fraction of daily volume per slice (5%).
+	DefaultTWAPTargetPct = 0.05
 )
 
-// CalibrateImpact fits Lambda (linear) and Eta (sqrt) from market history.
-// Uses daily (High-Low) as proxy for price impact and Volume as Q.
-// Lambda: (High-Low)/Volume per day, then median over days.
-// Eta: (High-Low)/sqrt(Volume) per day, then median.
-// SigmaSq: variance of daily log returns (so n* formula uses consistent units).
+// CalibrateImpact calibrates impact parameters from market history.
+//
+// Amihud illiquidity: median( |log(P_i/P_{i-1})| / Volume_i ).
+// Sigma: sample std dev of daily log-returns.
+// AvgDailyVolume: mean daily volume over the window.
 func CalibrateImpact(history []esi.HistoryEntry, days int) ImpactParams {
 	entries := filterLastNDays(history, days)
 	if len(entries) < 5 {
 		return ImpactParams{}
 	}
 
-	var lambdas, etas []float64
+	var amihudValues []float64
 	var logReturns []float64
 	var prevAvg float64
+	var totalVolume float64
+	var volumeDays int
 
 	for i, h := range entries {
 		if h.Average <= 0 {
 			continue
 		}
 		if h.Volume > 0 {
-			dayRange := h.Highest - h.Lowest
-			if dayRange < 0 {
-				dayRange = 0
-			}
-			lambdas = append(lambdas, dayRange/float64(h.Volume))
-			etas = append(etas, dayRange/math.Sqrt(float64(h.Volume)))
+			totalVolume += float64(h.Volume)
+			volumeDays++
 		}
-		if i > 0 && prevAvg > 0 {
+		if i > 0 && prevAvg > 0 && h.Volume > 0 {
 			logRet := math.Log(h.Average / prevAvg)
 			logReturns = append(logReturns, logRet)
+			// Amihud: |log-return| / volume
+			amihudValues = append(amihudValues, math.Abs(logRet)/float64(h.Volume))
 		}
 		prevAvg = h.Average
 	}
 
 	out := ImpactParams{DaysUsed: len(entries)}
-	if len(lambdas) < 3 {
+	if len(amihudValues) < 3 || len(logReturns) < 2 {
 		return out
 	}
 
-	out.Lambda = median(lambdas)
-	out.Eta = median(etas)
-	if len(logReturns) >= 2 {
-		out.SigmaSq = variance(logReturns)
-		out.Sigma = math.Sqrt(out.SigmaSq)
+	out.Amihud = median(amihudValues)
+	out.SigmaSq = variance(logReturns)
+	out.Sigma = math.Sqrt(out.SigmaSq)
+	if volumeDays > 0 {
+		out.AvgDailyVolume = totalVolume / float64(volumeDays)
 	}
 	out.Valid = true
 	return out
@@ -123,62 +128,81 @@ func variance(x []float64) float64 {
 		d := v - mean
 		sq += d * d
 	}
-	return sq / float64(len(x))
+	return sq / float64(len(x)-1) // Bessel's correction: unbiased sample variance
 }
 
-// ImpactLinear returns price impact (ΔP) for quantity Q using linear model: ΔP = λ × Q.
-func ImpactLinear(lambda float64, quantity float64) float64 {
-	if quantity <= 0 {
+// ImpactLinearPct returns estimated price impact (%) using Amihud linear model.
+// ΔP% = amihud × Q. Best for small orders (Q << daily volume).
+func ImpactLinearPct(amihud float64, quantity float64) float64 {
+	if quantity <= 0 || amihud <= 0 {
 		return 0
 	}
-	return lambda * quantity
+	return amihud * quantity * 100 // convert fractional to %
 }
 
-// ImpactSqrt returns price impact (ΔP) for quantity Q using square-root model: ΔP = η × √Q.
-func ImpactSqrt(eta float64, quantity float64) float64 {
-	if quantity <= 0 {
+// ImpactSqrtPct returns estimated price impact (%) using the square-root law.
+// ΔP% = σ × √(Q / V_daily) × 100.
+// Standard model: impact proportional to volatility × sqrt of participation rate.
+// Best for larger orders where impact is concave in quantity.
+func ImpactSqrtPct(sigma float64, quantity float64, avgDailyVolume float64) float64 {
+	if quantity <= 0 || sigma <= 0 || avgDailyVolume <= 0 {
 		return 0
 	}
-	return eta * math.Sqrt(quantity)
+	return sigma * math.Sqrt(quantity/avgDailyVolume) * 100
 }
 
-// OptimalSlicesTWAP computes optimal number of slices for TWAP/VWAP:
+// OptimalSlicesVolume computes the optimal number of TWAP slices based on
+// participation rate: each slice should not exceed targetPct of daily volume.
 //
-//	n* = √(σ² T / (2 λ κ))
+//	n* = ceil(Q / (targetPct × V_daily))
 //
-// With κ = kappaRatio × λ:  n* = √(σ² T / (2 λ² κappaRatio)).
-// T is in days, σ² is variance of daily log-returns (so same time scale).
-func OptimalSlicesTWAP(sigmaSq, lambda float64, horizonDays float64, kappaRatio float64) int {
-	if sigmaSq <= 0 || lambda <= 0 || horizonDays <= 0 || kappaRatio <= 0 {
+// Simple, dimensionally correct, and practical.
+func OptimalSlicesVolume(quantity float64, avgDailyVolume float64, targetPct float64) int {
+	if quantity <= 0 || avgDailyVolume <= 0 || targetPct <= 0 {
 		return 1
 	}
-	kappa := kappaRatio * lambda
-	denom := 2 * lambda * kappa
-	if denom <= 0 {
+	sliceSize := targetPct * avgDailyVolume
+	if sliceSize <= 0 {
 		return 1
 	}
-	n := math.Sqrt(sigmaSq * horizonDays / denom)
+	n := math.Ceil(quantity / sliceSize)
 	if n < 1 {
 		return 1
 	}
 	if n > 100 {
 		return 100
 	}
-	return int(math.Ceil(n))
+	return int(n)
 }
 
 // EstimateImpact returns impact estimate for a given quantity using calibrated params.
-func EstimateImpact(params ImpactParams, quantity float64, horizonDays float64) ImpactEstimate {
+// refPrice is a reference price (e.g. current best price) to convert % impact to ISK.
+func EstimateImpact(params ImpactParams, quantity float64, refPrice float64) ImpactEstimate {
 	out := ImpactEstimate{Params: params}
 	if quantity <= 0 {
 		return out
 	}
-	out.LinearImpact = ImpactLinear(params.Lambda, quantity)
-	out.SqrtImpact = ImpactSqrt(params.Eta, quantity)
-	out.RecommendedImpact = out.SqrtImpact
-	out.OptimalSlicesTWAP = OptimalSlicesTWAP(params.SigmaSq, params.Lambda, horizonDays, DefaultKappaRatio)
-	if out.OptimalSlicesTWAP < 1 {
-		out.OptimalSlicesTWAP = 1
+
+	out.LinearImpactPct = ImpactLinearPct(params.Amihud, quantity)
+	out.SqrtImpactPct = ImpactSqrtPct(params.Sigma, quantity, params.AvgDailyVolume)
+
+	// Choose recommendation: sqrt law for large orders (>1% of daily volume),
+	// linear for small orders.
+	if params.AvgDailyVolume > 0 && quantity > 0.01*params.AvgDailyVolume {
+		out.RecommendedImpactPct = out.SqrtImpactPct
+	} else {
+		out.RecommendedImpactPct = out.LinearImpactPct
 	}
+
+	// Convert to ISK if reference price is available
+	if refPrice > 0 {
+		out.RecommendedImpactISK = refPrice * out.RecommendedImpactPct / 100
+	}
+
+	out.OptimalSlices = OptimalSlicesVolume(quantity, params.AvgDailyVolume, DefaultTWAPTargetPct)
+	if out.OptimalSlices < 1 {
+		out.OptimalSlices = 1
+	}
+
 	return out
 }

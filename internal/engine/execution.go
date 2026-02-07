@@ -123,10 +123,16 @@ func ComputeExecutionPlan(orders []esi.MarketOrder, quantity int32, isBuy bool) 
 	}
 	out.TotalCost = out.ExpectedPrice * float64(quantity)
 
-	// Optimal slicing: simple sqrt heuristic n* ≈ sqrt(Q / k) so we don't move market too much.
-	// k = typical "chunk" that has ~1% impact (e.g. 500–2000 for many items). Use 1000 as default.
-	const defaultChunk = 1000
-	n := int(math.Ceil(math.Sqrt(float64(quantity) / defaultChunk)))
+	// Optimal slicing: participation-rate model.
+	// Each slice should not exceed targetPct of total book depth to avoid
+	// excessive price impact. This aligns with the same principle used in
+	// OptimalSlicesVolume (impact.go): n* = ceil(Q / (targetPct × Depth)).
+	const targetPct = 0.05 // max 5% of book depth per slice
+	sliceSize := float64(out.TotalDepth) * targetPct
+	if sliceSize < 10 {
+		sliceSize = 10 // floor: even for illiquid items, at least 10 units per slice
+	}
+	n := int(math.Ceil(float64(quantity) / sliceSize))
 	if n < 1 {
 		n = 1
 	}
@@ -134,10 +140,17 @@ func ComputeExecutionPlan(orders []esi.MarketOrder, quantity int32, isBuy bool) 
 		n = 20
 	}
 	out.OptimalSlices = n
-	// Suggest gap: e.g. 5–15 min between slices for urgency "normal"
-	out.SuggestedMinGap = 7
-	if n > 1 && quantity > 5000 {
+	// Suggest gap: scale with number of slices.
+	// More slices → longer gaps to let the book replenish.
+	switch {
+	case n <= 1:
+		out.SuggestedMinGap = 0
+	case n <= 3:
+		out.SuggestedMinGap = 5
+	case n <= 8:
 		out.SuggestedMinGap = 10
+	default:
+		out.SuggestedMinGap = 15
 	}
 
 	return out

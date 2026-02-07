@@ -28,17 +28,17 @@ type IndustryParams struct {
 
 // MaterialNode represents a node in the production tree.
 type MaterialNode struct {
-	TypeID       int32            `json:"type_id"`
-	TypeName     string           `json:"type_name"`
-	Quantity     int32            `json:"quantity"`      // Required quantity
-	IsBase       bool             `json:"is_base"`       // True if cannot be further produced
-	BuyPrice     float64          `json:"buy_price"`     // Market buy price (sell orders)
-	BuildCost    float64          `json:"build_cost"`    // Total cost to build (materials + job cost)
-	ShouldBuild  bool             `json:"should_build"`  // True if building is cheaper than buying
-	JobCost      float64          `json:"job_cost"`      // Manufacturing job installation cost
-	Children     []*MaterialNode  `json:"children"`      // Required sub-materials
-	Blueprint    *BlueprintInfo   `json:"blueprint"`     // Blueprint info if buildable
-	Depth        int              `json:"depth"`         // Depth in tree
+	TypeID      int32           `json:"type_id"`
+	TypeName    string          `json:"type_name"`
+	Quantity    int32           `json:"quantity"`     // Required quantity
+	IsBase      bool            `json:"is_base"`      // True if cannot be further produced
+	BuyPrice    float64         `json:"buy_price"`    // Market buy price (sell orders)
+	BuildCost   float64         `json:"build_cost"`   // Total cost to build (materials + job cost)
+	ShouldBuild bool            `json:"should_build"` // True if building is cheaper than buying
+	JobCost     float64         `json:"job_cost"`     // Manufacturing job installation cost
+	Children    []*MaterialNode `json:"children"`     // Required sub-materials
+	Blueprint   *BlueprintInfo  `json:"blueprint"`    // Blueprint info if buildable
+	Depth       int             `json:"depth"`        // Depth in tree
 }
 
 // BlueprintInfo contains blueprint information for display.
@@ -52,26 +52,26 @@ type BlueprintInfo struct {
 
 // IndustryAnalysis is the result of analyzing a production chain.
 type IndustryAnalysis struct {
-	TargetTypeID       int32          `json:"target_type_id"`
-	TargetTypeName     string         `json:"target_type_name"`
-	Runs               int32          `json:"runs"`
-	TotalQuantity      int32          `json:"total_quantity"`
-	MarketBuyPrice     float64        `json:"market_buy_price"`     // Cost to buy ready product (from sell orders, no broker fee)
-	TotalBuildCost     float64        `json:"total_build_cost"`     // Cost to build from scratch
-	OptimalBuildCost   float64        `json:"optimal_build_cost"`   // Cost with optimal buy/build decisions
-	Savings            float64        `json:"savings"`              // MarketBuyPrice - OptimalBuildCost
-	SavingsPercent     float64        `json:"savings_percent"`
-	SellRevenue        float64        `json:"sell_revenue"`         // Revenue after sales tax + broker fee
-	Profit             float64        `json:"profit"`               // SellRevenue - OptimalBuildCost
-	ProfitPercent      float64        `json:"profit_percent"`       // Profit / OptimalBuildCost * 100
-	ISKPerHour         float64        `json:"isk_per_hour"`         // Profit / manufacturing hours
-	ManufacturingTime  int32          `json:"manufacturing_time"`   // Total time in seconds
-	TotalJobCost       float64        `json:"total_job_cost"`       // Sum of all job installation costs
-	MaterialTree       *MaterialNode  `json:"material_tree"`
-	FlatMaterials      []*FlatMaterial `json:"flat_materials"`      // Flattened list of base materials
-	SystemCostIndex    float64        `json:"system_cost_index"`
-	RegionID           int32          `json:"region_id"`            // Market region for execution plan
-	RegionName         string         `json:"region_name"`          // Optional display name
+	TargetTypeID      int32           `json:"target_type_id"`
+	TargetTypeName    string          `json:"target_type_name"`
+	Runs              int32           `json:"runs"`
+	TotalQuantity     int32           `json:"total_quantity"`
+	MarketBuyPrice    float64         `json:"market_buy_price"`   // Cost to buy ready product (from sell orders, no broker fee)
+	TotalBuildCost    float64         `json:"total_build_cost"`   // Cost to build from scratch
+	OptimalBuildCost  float64         `json:"optimal_build_cost"` // Cost with optimal buy/build decisions
+	Savings           float64         `json:"savings"`            // MarketBuyPrice - OptimalBuildCost
+	SavingsPercent    float64         `json:"savings_percent"`
+	SellRevenue       float64         `json:"sell_revenue"`       // Revenue after sales tax + broker fee
+	Profit            float64         `json:"profit"`             // SellRevenue - OptimalBuildCost
+	ProfitPercent     float64         `json:"profit_percent"`     // Profit / OptimalBuildCost * 100
+	ISKPerHour        float64         `json:"isk_per_hour"`       // Profit / manufacturing hours
+	ManufacturingTime int32           `json:"manufacturing_time"` // Total time in seconds
+	TotalJobCost      float64         `json:"total_job_cost"`     // Sum of all job installation costs
+	MaterialTree      *MaterialNode   `json:"material_tree"`
+	FlatMaterials     []*FlatMaterial `json:"flat_materials"` // Flattened list of base materials
+	SystemCostIndex   float64         `json:"system_cost_index"`
+	RegionID          int32           `json:"region_id"`   // Market region for execution plan
+	RegionName        string          `json:"region_name"` // Optional display name
 }
 
 // FlatMaterial is a simplified material for the shopping list.
@@ -86,11 +86,11 @@ type FlatMaterial struct {
 
 // IndustryAnalyzer performs industry calculations.
 type IndustryAnalyzer struct {
-	SDE             *sde.Data
-	ESI             *esi.Client
-	IndustryCache   *esi.IndustryCache
-	adjustedPrices  map[int32]float64
-	marketPrices    map[int32]float64 // Best sell order prices
+	SDE            *sde.Data
+	ESI            *esi.Client
+	IndustryCache  *esi.IndustryCache
+	adjustedPrices map[int32]float64
+	marketPrices   map[int32]float64 // Best sell order prices
 }
 
 // NewIndustryAnalyzer creates a new analyzer.
@@ -121,7 +121,7 @@ func (a *IndustryAnalyzer) Analyze(params IndustryParams, progress func(string))
 	}
 
 	progress("Fetching market prices...")
-	
+
 	// Fetch adjusted prices for job cost calculation
 	adjustedPrices, err := a.ESI.GetAllAdjustedPrices(a.IndustryCache)
 	if err != nil {
@@ -162,7 +162,7 @@ func (a *IndustryAnalyzer) Analyze(params IndustryParams, progress func(string))
 
 	// Build material tree recursively using totalQuantity as desired items
 	tree := a.buildMaterialTree(params.TypeID, totalQuantity, params, 0)
-	
+
 	// Calculate costs
 	progress("Calculating optimal costs...")
 	a.calculateCosts(tree, costIndex, params)
@@ -186,8 +186,8 @@ func (a *IndustryAnalyzer) Analyze(params IndustryParams, progress func(string))
 	}
 
 	// FIX #6: Calculate profit if you sell the built product.
-	// Revenue = sell price × quantity × (1 - salesTax% - brokerFee%)
-	sellRevenue := marketBuyPrice * (1.0 - params.SalesTaxPercent/100 - params.BrokerFee/100)
+	// Revenue = sell price × quantity × (1 - salesTax%) × (1 - brokerFee%)
+	sellRevenue := marketBuyPrice * (1.0 - params.SalesTaxPercent/100) * (1.0 - params.BrokerFee/100)
 	profit := sellRevenue - optimalCost
 	profitPercent := 0.0
 	if optimalCost > 0 {
@@ -438,10 +438,10 @@ func (a *IndustryAnalyzer) GetBlueprintInfo(typeID int32) (*sde.Blueprint, bool)
 
 // SearchResult holds a search result with relevance score.
 type SearchResult struct {
-	TypeID      int32  `json:"type_id"`
-	TypeName    string `json:"type_name"`
-	HasBlueprint bool  `json:"has_blueprint"`
-	relevance   int    // 0 = exact, 1 = starts with, 2 = contains
+	TypeID       int32  `json:"type_id"`
+	TypeName     string `json:"type_name"`
+	HasBlueprint bool   `json:"has_blueprint"`
+	relevance    int    // 0 = exact, 1 = starts with, 2 = contains
 }
 
 // SearchBuildableItems returns items matching the query.

@@ -69,11 +69,11 @@ func (s *Scanner) findBestTrades(idx *orderIndex, fromSystemID int32, params Rou
 		return nil
 	}
 
-	feePercent := params.SalesTaxPercent + params.BrokerFeePercent
-	taxMult := 1.0 - feePercent/100
+	taxMult := 1.0 - params.SalesTaxPercent/100
 	if taxMult < 0 {
 		taxMult = 0
 	}
+	brokerFeeRate := params.BrokerFeePercent / 100 // fraction e.g. 0.03 for 3%
 
 	type candidate struct {
 		hop   RouteHop
@@ -110,12 +110,13 @@ func (s *Scanner) findBestTrades(idx *orderIndex, fromSystemID int32, params Rou
 				continue
 			}
 
-			effectiveSell := buy.Price * taxMult
-			profitPerUnit := effectiveSell - sell.Price
+			effectiveBuy := sell.Price * (1 + brokerFeeRate)
+			effectiveSell := buy.Price * taxMult * (1 - brokerFeeRate)
+			profitPerUnit := effectiveSell - effectiveBuy
 			if profitPerUnit <= 0 {
 				continue
 			}
-			margin := profitPerUnit / sell.Price * 100
+			margin := profitPerUnit / effectiveBuy * 100
 			if margin < params.MinMargin {
 				continue
 			}
@@ -142,20 +143,20 @@ func (s *Scanner) findBestTrades(idx *orderIndex, fromSystemID int32, params Rou
 			}
 			candidates = append(candidates, candidate{
 				hop: RouteHop{
-					SystemName:      s.systemName(fromSystemID),
-					SystemID:        fromSystemID,
-					RegionID:        regionID,
-					LocationID:      sell.LocationID,
-					DestSystemID:    buySystemID,
-					DestSystemName:  s.systemName(buySystemID),
-					DestLocationID:  buy.LocationID,
-					TypeName:        itemType.Name,
-					TypeID:          typeID,
-					BuyPrice:        sell.Price,
-					SellPrice:       buy.Price,
-					Units:           actualUnits,
-					Profit:          profit,
-					Jumps:           jumps,
+					SystemName:     s.systemName(fromSystemID),
+					SystemID:       fromSystemID,
+					RegionID:       regionID,
+					LocationID:     sell.LocationID,
+					DestSystemID:   buySystemID,
+					DestSystemName: s.systemName(buySystemID),
+					DestLocationID: buy.LocationID,
+					TypeName:       itemType.Name,
+					TypeID:         typeID,
+					BuyPrice:       sell.Price,
+					SellPrice:      buy.Price,
+					Units:          actualUnits,
+					Profit:         profit,
+					Jumps:          jumps,
 				},
 				score: ppj,
 			})

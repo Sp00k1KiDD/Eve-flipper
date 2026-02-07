@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"eve-flipper/internal/api"
 	"eve-flipper/internal/auth"
@@ -31,8 +35,9 @@ var defaultESICallbackURL = "http://localhost:13370/api/auth/callback"
 // loadDotEnv loads environment variables from a local .env file so that
 // double-clicked binaries (without a shell) can still use ESI_* settings.
 // Order of lookup:
-//   1) ./.env (current working directory)
-//   2) <binary-dir>/.env
+//  1. ./.env (current working directory)
+//  2. <binary-dir>/.env
+//
 // Existing OS env vars are NOT overridden.
 func loadDotEnv() {
 	paths := []string{".env"}
@@ -169,10 +174,28 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	logger.Server(addr)
-	if err := http.ListenAndServe(addr, handler); err != nil {
+
+	httpServer := &http.Server{Addr: addr, Handler: handler}
+
+	// Graceful shutdown on SIGINT / SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		logger.Info("Server", "Shutting down gracefully...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("Server", fmt.Sprintf("Shutdown error: %v", err))
+		}
+	}()
+
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("Server", fmt.Sprintf("Failed: %v", err))
 		os.Exit(1)
 	}
+	logger.Info("Server", "Stopped")
 }
 
 func envOrDefault(key, defaultVal string) string {

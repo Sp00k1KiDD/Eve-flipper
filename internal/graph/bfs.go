@@ -1,7 +1,5 @@
 package graph
 
-import "container/heap"
-
 // SystemsWithinRadius returns all systems reachable from origin within maxJumps,
 // mapped to their distance in jumps.
 func (u *Universe) SystemsWithinRadius(origin int32, maxJumps int) map[int32]int {
@@ -37,14 +35,16 @@ func (u *Universe) SystemsWithinRadiusMinSecurity(origin int32, maxJumps int, mi
 	return result
 }
 
-// ShortestPath returns the shortest jump count between origin and dest using Dijkstra.
+// ShortestPath returns the shortest jump count between origin and dest using BFS.
+// All edges have unit weight (1 jump), so BFS is optimal.
 // Returns -1 if no path exists.
 func (u *Universe) ShortestPath(origin, dest int32) int {
 	return u.ShortestPathMinSecurity(origin, dest, 0)
 }
 
 // ShortestPathMinSecurity returns the shortest jump count using only systems with
-// security >= minSecurity. Use minSecurity <= 0 for no filter. Returns -1 if no path exists.
+// security >= minSecurity. Uses BFS (all edges are unit weight).
+// Use minSecurity <= 0 for no filter. Returns -1 if no path exists.
 func (u *Universe) ShortestPathMinSecurity(origin, dest int32, minSecurity float64) int {
 	if origin == dest {
 		return 0
@@ -61,27 +61,25 @@ func (u *Universe) ShortestPathMinSecurity(origin, dest int32, minSecurity float
 	dist := make(map[int32]int)
 	dist[origin] = 0
 
-	pq := &priorityQueue{{systemID: origin, dist: 0}}
-	heap.Init(pq)
+	queue := []int32{origin}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		currentDist := dist[current]
 
-	for pq.Len() > 0 {
-		item := heap.Pop(pq).(pqItem)
-		if item.systemID == dest {
-			return item.dist
-		}
-		if d, ok := dist[item.systemID]; ok && item.dist > d {
-			continue
-		}
-		for _, neighbor := range u.Adj[item.systemID] {
+		for _, neighbor := range u.Adj[current] {
 			if minSecurity > 0 {
 				if sec, ok := u.SystemSecurity[neighbor]; !ok || sec < minSecurity {
 					continue
 				}
 			}
-			nd := item.dist + 1
-			if d, ok := dist[neighbor]; !ok || nd < d {
+			if _, visited := dist[neighbor]; !visited {
+				nd := currentDist + 1
+				if neighbor == dest {
+					return nd
+				}
 				dist[neighbor] = nd
-				heap.Push(pq, pqItem{systemID: neighbor, dist: nd})
+				queue = append(queue, neighbor)
 			}
 		}
 	}
@@ -109,24 +107,4 @@ func (u *Universe) SystemsInRegions(regions map[int32]bool) map[int32]int {
 		}
 	}
 	return out
-}
-
-// Priority queue for Dijkstra
-type pqItem struct {
-	systemID int32
-	dist     int
-}
-
-type priorityQueue []pqItem
-
-func (pq priorityQueue) Len() int            { return len(pq) }
-func (pq priorityQueue) Less(i, j int) bool  { return pq[i].dist < pq[j].dist }
-func (pq priorityQueue) Swap(i, j int)       { pq[i], pq[j] = pq[j], pq[i] }
-func (pq *priorityQueue) Push(x interface{}) { *pq = append(*pq, x.(pqItem)) }
-func (pq *priorityQueue) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	*pq = old[:n-1]
-	return item
 }

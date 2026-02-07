@@ -330,18 +330,30 @@ func extractZip(src, dst string) error {
 	}
 	defer r.Close()
 
+	// Resolve destination to an absolute path for zip slip prevention
+	dstAbs, err := filepath.Abs(dst)
+	if err != nil {
+		return fmt.Errorf("resolve extract dir: %w", err)
+	}
+
 	for _, f := range r.File {
-		path := filepath.Join(dst, f.Name)
+		fpath := filepath.Join(dstAbs, f.Name)
+
+		// Zip slip guard: ensure the resolved path stays within dst
+		if rel, err := filepath.Rel(dstAbs, fpath); err != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("illegal zip entry path: %s", f.Name)
+		}
+
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(path, 0755)
+			os.MkdirAll(fpath, 0755)
 			continue
 		}
-		os.MkdirAll(filepath.Dir(path), 0755)
+		os.MkdirAll(filepath.Dir(fpath), 0755)
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
-		out, err := os.Create(path)
+		out, err := os.Create(fpath)
 		if err != nil {
 			rc.Close()
 			return err
