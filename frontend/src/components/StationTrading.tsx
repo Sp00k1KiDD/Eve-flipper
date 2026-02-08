@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { StationTrade, StationInfo, ScanParams, WatchlistItem } from "@/lib/types";
-import { getStations, scanStation, getWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/api";
+import { getStations, getStructures, scanStation, getWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/api";
 import { formatISK, formatMargin, formatNumber } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { MetricTooltip } from "./Tooltip";
@@ -77,6 +77,15 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   const [progress, setProgress] = useState("");
   const [loadingStations, setLoadingStations] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // System-level metadata (always available even with no NPC stations)
+  const [systemRegionId, setSystemRegionId] = useState<number>(0);
+  const [systemId, setSystemId] = useState<number>(0);
+
+  // Player structure support
+  const [includeStructures, setIncludeStructures] = useState(false);
+  const [structureStations, setStructureStations] = useState<StationInfo[]>([]);
+  const [loadingStructures, setLoadingStructures] = useState(false);
 
   // EVE Guru Profit Filters
   const [minItemProfit, setMinItemProfit] = useState(0);
@@ -174,27 +183,46 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
     if (!params.system_name) return;
     setLoadingStations(true);
     getStations(params.system_name)
-      .then((s) => {
-        setStations(s);
+      .then((resp) => {
+        setStations(resp.stations);
+        setSystemRegionId(resp.region_id);
+        setSystemId(resp.system_id);
         setSelectedStationId(ALL_STATIONS_ID);
+        setStructureStations([]); // reset structures on system change
       })
-      .catch(() => setStations([]))
+      .catch(() => {
+        setStations([]);
+        setSystemRegionId(0);
+        setSystemId(0);
+      })
       .finally(() => setLoadingStations(false));
   }, [params.system_name]);
 
-  const selectedStation = useMemo(
-    () => stations.find((s) => s.id === selectedStationId) ?? null,
-    [stations, selectedStationId]
-  );
+  // Fetch structures when toggle is enabled
+  useEffect(() => {
+    if (!includeStructures || !systemId || !systemRegionId) {
+      setStructureStations([]);
+      return;
+    }
+    setLoadingStructures(true);
+    getStructures(systemId, systemRegionId)
+      .then(setStructureStations)
+      .catch(() => setStructureStations([]))
+      .finally(() => setLoadingStructures(false));
+  }, [includeStructures, systemId, systemRegionId]);
 
-  // Determine region_id from selected station or first station
-  const regionId = useMemo(() => {
-    if (selectedStation) return selectedStation.region_id;
-    if (stations.length > 0) return stations[0].region_id;
-    return 0;
-  }, [selectedStation, stations]);
+  // Combined stations (NPC + structures when toggle is on)
+  const allStations = useMemo(() => {
+    if (includeStructures && structureStations.length > 0) {
+      return [...stations, ...structureStations];
+    }
+    return stations;
+  }, [stations, structureStations, includeStructures]);
 
-  const canScan = params.system_name && (stations.length > 0 || radius > 0);
+  // Region ID comes from system metadata, not from stations
+  const regionId = systemRegionId;
+
+  const canScan = params.system_name && (allStations.length > 0 || radius > 0) && regionId > 0;
 
   function stationRowKey(row: StationTrade) {
     return `${row.TypeID}-${row.StationID}`;
@@ -282,6 +310,12 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
         scanParams.region_id = regionId;
       }
 
+      // Include player structures if toggle is on
+      if (includeStructures && structureStations.length > 0) {
+        scanParams.include_structures = true;
+        scanParams.structure_ids = structureStations.map((s) => s.id);
+      }
+
       const res = await scanStation(scanParams, setProgress, controller.signal);
       setResults(res);
     } catch (e: unknown) {
@@ -293,7 +327,7 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
     }
   }, [scanning, canScan, selectedStationId, regionId, params, brokerFee, salesTaxPercent, radius, minDailyVolume,
       minItemProfit, minDemandPerDay, avgPricePeriod, minPeriodROI, bvsRatioMin, bvsRatioMax,
-      maxPVI, maxSDS, limitBuyToPriceLow, flagExtremePrices, t]);
+      maxPVI, maxSDS, limitBuyToPriceLow, flagExtremePrices, includeStructures, structureStations, t]);
 
   const sorted = useMemo(() => {
     const copy = [...results];
@@ -369,11 +403,12 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   // Build station options for select
   const stationOptions = useMemo(() => {
     const opts = [{ value: ALL_STATIONS_ID, label: t("allStations") }];
-    for (const st of stations) {
-      opts.push({ value: st.id, label: st.name });
+    for (const st of allStations) {
+      const label = st.is_structure ? `\u{1F3D7}\uFE0F ${st.name}` : st.name;
+      opts.push({ value: st.id, label });
     }
     return opts;
-  }, [stations, t]);
+  }, [allStations, t]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -407,10 +442,18 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
               />
             </SettingsField>
             <SettingsField label={t("stationSelect")}>
-              {loadingStations ? (
-                <div className="h-[34px] flex items-center text-xs text-eve-dim">{t("loadingStations")}</div>
-              ) : stations.length === 0 ? (
-                <div className="h-[34px] flex items-center text-xs text-eve-dim">{t("noStations")}</div>
+              {loadingStations || loadingStructures ? (
+                <div className="h-[34px] flex items-center text-xs text-eve-dim">
+                  {loadingStructures ? t("loadingStructures") : t("loadingStations")}
+                </div>
+              ) : allStations.length === 0 ? (
+                <div className="h-[34px] flex items-center text-xs text-eve-dim">
+                  {stations.length === 0 && !isLoggedIn
+                    ? t("noNpcStationsLoginHint")
+                    : stations.length === 0 && isLoggedIn && !includeStructures
+                      ? t("noNpcStationsToggleHint")
+                      : t("noStations")}
+                </div>
               ) : (
                 <SettingsSelect
                   value={selectedStationId}
@@ -419,6 +462,14 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
                 />
               )}
             </SettingsField>
+            {isLoggedIn && (
+              <SettingsField label={t("includeStructures")}>
+                <SettingsCheckbox
+                  checked={includeStructures}
+                  onChange={setIncludeStructures}
+                />
+              </SettingsField>
+            )}
 
             <SettingsField label={t("stationRadius")}>
               <SettingsNumberInput

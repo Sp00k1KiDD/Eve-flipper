@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { autocomplete, getCharacterLocation } from "@/lib/api";
+import { autocomplete, getCharacterLocation, getStations } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 interface Props {
@@ -9,20 +9,42 @@ interface Props {
   showLocationButton?: boolean;
   /** Whether the user is logged in (enables location button) */
   isLoggedIn?: boolean;
+  /** Whether "include structures" toggle is on */
+  includeStructures?: boolean;
+  /** Callback when structure toggle changes */
+  onIncludeStructuresChange?: (v: boolean) => void;
 }
 
-export function SystemAutocomplete({ value, onChange, showLocationButton = true, isLoggedIn = false }: Props) {
+export function SystemAutocomplete({ value, onChange, showLocationButton = true, isLoggedIn = false, includeStructures, onIncludeStructuresChange }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState(value);
   const [locationLoading, setLocationLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [noStations, setNoStations] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setQuery(value);
+  }, [value]);
+
+  // Check if selected system has NPC stations
+  useEffect(() => {
+    if (!value || value.length < 2) {
+      setNoStations(false);
+      return;
+    }
+    let cancelled = false;
+    getStations(value)
+      .then((resp) => {
+        if (!cancelled) setNoStations(resp.stations.length === 0);
+      })
+      .catch(() => {
+        if (!cancelled) setNoStations(false);
+      });
+    return () => { cancelled = true; };
   }, [value]);
 
   // Cleanup autocomplete timer on unmount
@@ -93,7 +115,9 @@ export function SystemAutocomplete({ value, onChange, showLocationButton = true,
     }
   };
 
-  const showButton = showLocationButton && isLoggedIn;
+  const showLocationBtn = showLocationButton && isLoggedIn;
+  const showStructureBtn = isLoggedIn && onIncludeStructuresChange != null;
+  const btnCount = (showLocationBtn ? 1 : 0) + (showStructureBtn ? 1 : 0);
 
   return (
     <div ref={containerRef} className="relative">
@@ -107,31 +131,50 @@ export function SystemAutocomplete({ value, onChange, showLocationButton = true,
         className={`w-full px-3 py-1.5 bg-eve-input border border-eve-border rounded-sm text-eve-text
                    placeholder:text-eve-dim text-sm font-mono
                    focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30
-                   transition-colors ${showButton ? "pr-8" : ""}`}
+                   transition-colors`}
+        style={{ paddingRight: btnCount > 0 ? `${btnCount * 24 + 4}px` : undefined }}
       />
-      {showButton && (
-        <button
-          type="button"
-          onClick={handleLocationClick}
-          disabled={locationLoading}
-          title={t("useCurrentLocation")}
-          className="absolute right-1 top-1/2 -translate-y-1/2 p-1
-                     text-eve-dim hover:text-eve-accent
-                     disabled:opacity-50 disabled:cursor-not-allowed
-                     transition-colors"
-        >
-          {locationLoading ? (
-            <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="32" strokeLinecap="round" />
+      <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+        {showStructureBtn && (
+          <button
+            type="button"
+            onClick={() => onIncludeStructuresChange!(!includeStructures)}
+            title={includeStructures ? t("includeStructures") + " (ON)" : t("includeStructures") + " (OFF)"}
+            className={`p-1 transition-colors ${
+              includeStructures
+                ? "text-eve-accent"
+                : "text-eve-dim hover:text-eve-accent opacity-50 hover:opacity-100"
+            }`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill={includeStructures ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5">
+              <path d="M12 2L3 9v12h18V9L12 2z" />
+              <rect x="9" y="14" width="6" height="7" />
             </svg>
-          ) : (
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
-            </svg>
-          )}
-        </button>
-      )}
+          </button>
+        )}
+        {showLocationBtn && (
+          <button
+            type="button"
+            onClick={handleLocationClick}
+            disabled={locationLoading}
+            title={t("useCurrentLocation")}
+            className="p-1 text-eve-dim hover:text-eve-accent
+                       disabled:opacity-50 disabled:cursor-not-allowed
+                       transition-colors"
+          >
+            {locationLoading ? (
+              <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="32" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v4m0 12v4M2 12h4m12 0h4" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
       {open && suggestions.length > 0 && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-eve-panel border border-eve-border rounded-sm shadow-eve-glow max-h-48 overflow-y-auto">
           {suggestions.map((name, i) => (
@@ -147,6 +190,15 @@ export function SystemAutocomplete({ value, onChange, showLocationButton = true,
               {name}
             </div>
           ))}
+        </div>
+      )}
+      {noStations && !open && (
+        <div className="absolute z-40 left-0 right-0 top-full mt-1 px-1 py-0.5 text-[10px] text-amber-400/80 leading-tight bg-eve-panel/95 border border-eve-border/50 rounded-sm">
+          {!isLoggedIn
+            ? t("noNpcStationsLoginHint")
+            : !includeStructures
+              ? t("noNpcStationsToggleHint")
+              : null}
         </div>
       )}
     </div>

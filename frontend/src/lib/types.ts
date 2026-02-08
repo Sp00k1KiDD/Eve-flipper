@@ -163,6 +163,13 @@ export interface StationInfo {
   name: string;
   system_id: number;
   region_id: number;
+  is_structure?: boolean;
+}
+
+export interface StationsResponse {
+  stations: StationInfo[];
+  region_id: number;
+  system_id: number;
 }
 
 // Execution plan (slippage / fill curve)
@@ -227,6 +234,8 @@ export interface ScanParams {
   max_contract_margin?: number;
   min_priced_ratio?: number;
   require_history?: boolean;
+  // Player structures
+  include_structures?: boolean;
 }
 
 export interface AppConfig {

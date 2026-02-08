@@ -1,4 +1,4 @@
-import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationTrade, UndercutStatus, WatchlistItem } from "./types";
+import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationsResponse, StationTrade, UndercutStatus, WatchlistItem } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:13370";
 
@@ -162,6 +162,7 @@ export async function findRoutes(
       max_hops: maxHops,
       max_results: params.max_results,
       min_route_security: params.min_route_security,
+      include_structures: params.include_structures,
     },
     onProgress,
     signal,
@@ -206,8 +207,13 @@ export async function updateWatchlistItem(typeId: number, alertMinMargin: number
 
 // --- Station Trading ---
 
-export async function getStations(systemName: string): Promise<StationInfo[]> {
+export async function getStations(systemName: string): Promise<StationsResponse> {
   const res = await fetch(`${BASE}/api/stations?system=${encodeURIComponent(systemName)}`);
+  return handleResponse<StationsResponse>(res);
+}
+
+export async function getStructures(systemId: number, regionId: number): Promise<StationInfo[]> {
+  const res = await fetch(`${BASE}/api/auth/structures?system_id=${systemId}&region_id=${regionId}`);
   return handleResponse<StationInfo[]>(res);
 }
 
@@ -258,6 +264,9 @@ export async function scanStation(
     max_sds?: number;
     limit_buy_to_price_low?: boolean;
     flag_extreme_prices?: boolean;
+    // Player structures
+    include_structures?: boolean;
+    structure_ids?: number[];
   },
   onProgress: (msg: string) => void,
   signal?: AbortSignal

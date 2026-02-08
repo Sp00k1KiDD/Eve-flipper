@@ -40,6 +40,9 @@ type Client struct {
 	stationStore StationStore // L2 persistent cache (SQLite)
 	orderCache   *OrderCache  // region order cache with ETag/Expires
 
+	// EVERef structure name fallback (loaded at startup)
+	everefNames sync.Map // int64 -> string
+
 	// Health check cache
 	healthMu      sync.RWMutex
 	healthOK      bool
@@ -72,6 +75,63 @@ func NewClient(store StationStore) *Client {
 		stationStore: store,
 		orderCache:   NewOrderCache(),
 	}
+}
+
+const everefStructuresURL = "https://data.everef.net/structures/structures-latest.v2.json"
+
+// LoadEVERefStructures fetches the public structure names from EVERef as a fallback
+// for when ESI returns 403 on /universe/structures/{id}/. Runs in the background.
+func (c *Client) LoadEVERefStructures() {
+	go func() {
+		start := time.Now()
+		req, err := http.NewRequest("GET", everefStructuresURL, nil)
+		if err != nil {
+			log.Printf("[ESI] EVERef structures: request error: %v", err)
+			return
+		}
+		req.Header.Set("User-Agent", "eve-flipper/1.0 (github.com)")
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			log.Printf("[ESI] EVERef structures: fetch error: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			log.Printf("[ESI] EVERef structures: HTTP %d", resp.StatusCode)
+			return
+		}
+
+		// Parse JSON: map of structure_id (string key) -> object with "name" field
+		var raw map[string]struct {
+			Name     string `json:"name"`
+			SystemID int32  `json:"solar_system_id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			log.Printf("[ESI] EVERef structures: decode error: %v", err)
+			return
+		}
+
+		count := 0
+		for idStr, s := range raw {
+			id, err := strconv.ParseInt(idStr, 10, 64)
+			if err != nil || s.Name == "" {
+				continue
+			}
+			c.everefNames.Store(id, s.Name)
+			count++
+		}
+		log.Printf("[ESI] EVERef structures loaded: %d names in %dms", count, time.Since(start).Milliseconds())
+	}()
+}
+
+// EVERefStructureName returns the structure name from the EVERef dataset, or empty string if not found.
+func (c *Client) EVERefStructureName(structureID int64) string {
+	if v, ok := c.everefNames.Load(structureID); ok {
+		return v.(string)
+	}
+	return ""
 }
 
 // HealthCheck pings ESI to verify connectivity.
@@ -124,9 +184,19 @@ func (c *Client) HealthStatus() (ok bool, lastOK time.Time) {
 	return c.healthOK, c.healthLastOK
 }
 
+// isNPCStation returns true if the location ID is in the NPC station range.
+func isNPCStation(locationID int64) bool {
+	return locationID >= 60000000 && locationID < 64000000
+}
+
+// isPlayerStructure returns true if the location ID looks like a player-owned structure.
+func isPlayerStructure(locationID int64) bool {
+	return locationID >= 100000000 && !isNPCStation(locationID)
+}
+
 // StationName fetches and caches a station name by ID.
-// For NPC stations (< 1B), uses /universe/stations/{id}/
-// For player structures (>= 1B), returns "Structure {id}" (requires auth).
+// For NPC stations (60M–64M), uses /universe/stations/{id}/ (unauthenticated).
+// For player structures, returns cached name or "Structure {id}" (use StructureName for auth-based resolution).
 func (c *Client) StationName(locationID int64) string {
 	// L1: in-memory cache
 	if v, ok := c.stationCache.Load(locationID); ok {
@@ -139,9 +209,9 @@ func (c *Client) StationName(locationID int64) string {
 			return name
 		}
 	}
-	// L3: ESI API
+	// L3: ESI API (only for NPC stations — structures require auth)
 	name := fmt.Sprintf("Location %d", locationID)
-	if locationID >= 60000000 && locationID < 64000000 {
+	if isNPCStation(locationID) {
 		var info struct {
 			Name string `json:"name"`
 		}
@@ -149,12 +219,158 @@ func (c *Client) StationName(locationID int64) string {
 		if err := c.GetJSON(url, &info); err == nil && info.Name != "" {
 			name = info.Name
 		}
+	} else if isPlayerStructure(locationID) {
+		// Only cache placeholder in L1 — StructureName() with auth can resolve later
+		name = fmt.Sprintf("Structure %d", locationID)
+		c.stationCache.Store(locationID, name)
+		return name
 	}
 	c.stationCache.Store(locationID, name)
 	if c.stationStore != nil {
 		c.stationStore.SetStation(locationID, name)
 	}
 	return name
+}
+
+// StructureName fetches and caches a player structure name using an authenticated ESI call.
+// Uses GET /universe/structures/{structure_id}/ with Bearer token.
+// Falls back to cache or "Structure {id}" on error.
+func (c *Client) StructureName(structureID int64, accessToken string) string {
+	// L1: in-memory cache (skip "Structure NNN" / "Location NNN" placeholders)
+	if v, ok := c.stationCache.Load(structureID); ok {
+		name := v.(string)
+		if !strings.HasPrefix(name, "Structure ") && !strings.HasPrefix(name, "Location ") {
+			return name
+		}
+	}
+	// L2: persistent DB cache (skip placeholders)
+	if c.stationStore != nil {
+		if name, ok := c.stationStore.GetStation(structureID); ok {
+			if !strings.HasPrefix(name, "Structure ") && !strings.HasPrefix(name, "Location ") {
+				c.stationCache.Store(structureID, name)
+				return name
+			}
+		}
+	}
+	// L3: Authenticated ESI call
+	var info struct {
+		Name          string `json:"name"`
+		SolarSystemID int32  `json:"solar_system_id"`
+	}
+	url := fmt.Sprintf("%s/universe/structures/%d/?datasource=tranquility", baseURL, structureID)
+	if err := c.AuthGetJSON(url, accessToken, &info); err == nil && info.Name != "" {
+		log.Printf("[ESI] Resolved structure %d → %q", structureID, info.Name)
+		c.stationCache.Store(structureID, info.Name)
+		if c.stationStore != nil {
+			c.stationStore.SetStation(structureID, info.Name)
+		}
+		return info.Name
+	} else if err != nil {
+		log.Printf("[ESI] StructureName(%d) failed: %v", structureID, err)
+	}
+	// L4: EVERef fallback — public structure dataset
+	if eveName := c.EVERefStructureName(structureID); eveName != "" {
+		log.Printf("[ESI] Resolved structure %d via EVERef → %q", structureID, eveName)
+		c.stationCache.Store(structureID, eveName)
+		if c.stationStore != nil {
+			c.stationStore.SetStation(structureID, eveName)
+		}
+		return eveName
+	}
+	// Fallback — only cache in L1 (not L2), so re-login can resolve later
+	name := fmt.Sprintf("Structure %d", structureID)
+	c.stationCache.Store(structureID, name)
+	return name
+}
+
+// StructureInfo holds details about a player-owned structure.
+type StructureInfo struct {
+	ID       int64
+	Name     string
+	SystemID int32
+	RegionID int32
+}
+
+// FetchSystemStructures discovers player-owned structures with active markets
+// in a given system by scanning region orders for non-NPC location IDs.
+// Requires an authenticated access token for structure name resolution.
+func (c *Client) FetchSystemStructures(systemID int32, regionID int32, accessToken string) ([]StructureInfo, error) {
+	// Fetch all region orders (uses cache)
+	orders, err := c.FetchRegionOrders(regionID, "all")
+	if err != nil {
+		return nil, fmt.Errorf("fetch region orders: %w", err)
+	}
+
+	// Collect unique structure location IDs in the target system
+	seen := make(map[int64]bool)
+	for _, o := range orders {
+		if o.SystemID == systemID && isPlayerStructure(o.LocationID) {
+			seen[o.LocationID] = true
+		}
+	}
+
+	if len(seen) == 0 {
+		return nil, nil
+	}
+
+	// Resolve structure names concurrently
+	type result struct {
+		id   int64
+		name string
+	}
+	results := make(chan result, len(seen))
+	var wg sync.WaitGroup
+	for id := range seen {
+		wg.Add(1)
+		go func(sid int64) {
+			defer wg.Done()
+			name := c.StructureName(sid, accessToken)
+			results <- result{id: sid, name: name}
+		}(id)
+	}
+	wg.Wait()
+	close(results)
+
+	var structures []StructureInfo
+	for r := range results {
+		structures = append(structures, StructureInfo{
+			ID:       r.id,
+			Name:     r.name,
+			SystemID: systemID,
+			RegionID: regionID,
+		})
+	}
+	return structures, nil
+}
+
+// PrefetchStructureNames fetches structure names concurrently for a set of location IDs
+// that are player structures. Requires an access token.
+func (c *Client) PrefetchStructureNames(locationIDs map[int64]bool, accessToken string) {
+	var toFetch []int64
+	for id := range locationIDs {
+		if !isPlayerStructure(id) {
+			continue
+		}
+		if v, ok := c.stationCache.Load(id); ok {
+			name := v.(string)
+			if !strings.HasPrefix(name, "Structure ") && !strings.HasPrefix(name, "Location ") {
+				continue // already resolved
+			}
+		}
+		toFetch = append(toFetch, id)
+	}
+	if len(toFetch) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, id := range toFetch {
+		wg.Add(1)
+		go func(sid int64) {
+			defer wg.Done()
+			c.StructureName(sid, accessToken)
+		}(id)
+	}
+	wg.Wait()
 }
 
 // isRetryable returns true if the HTTP status code indicates a transient error worth retrying.

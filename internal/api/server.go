@@ -130,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/undercuts", s.handleAuthUndercuts)
 	mux.HandleFunc("GET /api/auth/portfolio", s.handleAuthPortfolio)
 	mux.HandleFunc("GET /api/auth/portfolio/optimize", s.handleAuthPortfolioOptimize)
+	mux.HandleFunc("GET /api/auth/structures", s.handleAuthStructures)
 	// Industry
 	mux.HandleFunc("POST /api/industry/analyze", s.handleIndustryAnalyze)
 	mux.HandleFunc("GET /api/industry/search", s.handleIndustrySearch)
@@ -179,6 +180,126 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// isPlayerStructure returns true if the location ID is a player-owned structure (not NPC station).
+func isPlayerStructure(id int64) bool {
+	return id >= 100000000 && !(id >= 60000000 && id < 64000000)
+}
+
+// enrichStructureNames resolves player-structure names in FlipResult slice
+// if the user is authenticated. Results with unresolved structure names are
+// filtered out (user can't find unnamed structures in-game).
+func (s *Server) enrichStructureNames(results []engine.FlipResult) []engine.FlipResult {
+	token, err := s.sessions.EnsureValidToken(s.sso)
+	if err != nil {
+		return results // not authenticated, skip
+	}
+	structureIDs := make(map[int64]bool)
+	for _, r := range results {
+		if isPlayerStructure(r.BuyLocationID) {
+			structureIDs[r.BuyLocationID] = true
+		}
+		if isPlayerStructure(r.SellLocationID) {
+			structureIDs[r.SellLocationID] = true
+		}
+	}
+	if len(structureIDs) == 0 {
+		return results
+	}
+	s.esi.PrefetchStructureNames(structureIDs, token)
+
+	// Resolve names and track which IDs remain unresolved
+	resolved := make(map[int64]string)
+	unresolved := make(map[int64]bool)
+	for id := range structureIDs {
+		name := s.esi.StationName(id)
+		if strings.HasPrefix(name, "Structure ") || strings.HasPrefix(name, "Location ") {
+			unresolved[id] = true
+		} else {
+			resolved[id] = name
+		}
+	}
+
+	// Update names and filter out results with unresolved structures
+	filtered := make([]engine.FlipResult, 0, len(results))
+	for i := range results {
+		if unresolved[results[i].BuyLocationID] || unresolved[results[i].SellLocationID] {
+			continue // skip — user can't find this structure in-game
+		}
+		if name, ok := resolved[results[i].BuyLocationID]; ok {
+			results[i].BuyStation = name
+		}
+		if name, ok := resolved[results[i].SellLocationID]; ok {
+			results[i].SellStation = name
+		}
+		filtered = append(filtered, results[i])
+	}
+	if dropped := len(results) - len(filtered); dropped > 0 {
+		log.Printf("[API] Filtered %d results with unresolved structure names", dropped)
+	}
+	return filtered
+}
+
+// enrichRouteStructureNames resolves player-structure names in RouteResult slice.
+// Routes containing hops with unresolved structure names are filtered out.
+func (s *Server) enrichRouteStructureNames(results []engine.RouteResult) []engine.RouteResult {
+	token, err := s.sessions.EnsureValidToken(s.sso)
+	if err != nil {
+		return results
+	}
+	structureIDs := make(map[int64]bool)
+	for _, route := range results {
+		for _, hop := range route.Hops {
+			if isPlayerStructure(hop.LocationID) {
+				structureIDs[hop.LocationID] = true
+			}
+			if isPlayerStructure(hop.DestLocationID) {
+				structureIDs[hop.DestLocationID] = true
+			}
+		}
+	}
+	if len(structureIDs) == 0 {
+		return results
+	}
+	s.esi.PrefetchStructureNames(structureIDs, token)
+
+	// Resolve names and track which IDs remain unresolved
+	resolved := make(map[int64]string)
+	unresolved := make(map[int64]bool)
+	for id := range structureIDs {
+		name := s.esi.StationName(id)
+		if strings.HasPrefix(name, "Structure ") || strings.HasPrefix(name, "Location ") {
+			unresolved[id] = true
+		} else {
+			resolved[id] = name
+		}
+	}
+
+	// Update names and filter out routes with unresolved structures
+	filtered := make([]engine.RouteResult, 0, len(results))
+	for i := range results {
+		skip := false
+		for j := range results[i].Hops {
+			if unresolved[results[i].Hops[j].LocationID] || unresolved[results[i].Hops[j].DestLocationID] {
+				skip = true
+				break
+			}
+			if name, ok := resolved[results[i].Hops[j].LocationID]; ok {
+				results[i].Hops[j].StationName = name
+			}
+			if name, ok := resolved[results[i].Hops[j].DestLocationID]; ok {
+				results[i].Hops[j].DestStationName = name
+			}
+		}
+		if !skip {
+			filtered = append(filtered, results[i])
+		}
+	}
+	if dropped := len(results) - len(filtered); dropped > 0 {
+		log.Printf("[API] Filtered %d routes with unresolved structure names", dropped)
+	}
+	return filtered
 }
 
 // --- Handlers ---
@@ -370,6 +491,8 @@ type scanRequest struct {
 	MaxContractMargin float64 `json:"max_contract_margin"`
 	MinPricedRatio    float64 `json:"min_priced_ratio"`
 	RequireHistory    bool    `json:"require_history"`
+	// Player structures
+	IncludeStructures bool `json:"include_structures"`
 }
 
 func (s *Server) parseScanParams(req scanRequest) (engine.ScanParams, error) {
@@ -463,6 +586,11 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	durationMs := time.Since(startTime).Milliseconds()
 	log.Printf("[API] Scan complete: %d results in %dms", len(results), durationMs)
 
+	// Resolve structure names if user enabled the toggle
+	if req.IncludeStructures {
+		results = s.enrichStructureNames(results)
+	}
+
 	topProfit := 0.0
 	totalProfit := 0.0
 	for _, r := range results {
@@ -531,6 +659,11 @@ func (s *Server) handleScanMultiRegion(w http.ResponseWriter, r *http.Request) {
 
 	durationMs := time.Since(startTime).Milliseconds()
 	log.Printf("[API] ScanMultiRegion complete: %d results in %dms", len(results), durationMs)
+
+	// Resolve structure names if user enabled the toggle
+	if req.IncludeStructures {
+		results = s.enrichStructureNames(results)
+	}
 
 	topProfit := 0.0
 	totalProfit := 0.0
@@ -634,7 +767,8 @@ func (s *Server) handleRouteFind(w http.ResponseWriter, r *http.Request) {
 		MinHops          int     `json:"min_hops"`
 		MaxHops          int     `json:"max_hops"`
 		MaxResults       int     `json:"max_results"`
-		MinRouteSecurity float64 `json:"min_route_security"` // 0 = all; 0.45 = highsec only; 0.7 = min 0.7
+		MinRouteSecurity  float64 `json:"min_route_security"` // 0 = all; 0.45 = highsec only; 0.7 = min 0.7
+		IncludeStructures bool    `json:"include_structures"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, 400, "invalid json")
@@ -697,6 +831,11 @@ func (s *Server) handleRouteFind(w http.ResponseWriter, r *http.Request) {
 
 	durationMs := time.Since(startTime).Milliseconds()
 	log.Printf("[API] RouteFind complete: %d routes in %dms", len(results), durationMs)
+
+	// Resolve structure names if user enabled the toggle
+	if req.IncludeStructures {
+		results = s.enrichRouteStructureNames(results)
+	}
 
 	var topProfit, totalProfit float64
 	for _, r := range results {
@@ -816,6 +955,9 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 		MaxSDS             int     `json:"max_sds"`
 		LimitBuyToPriceLow bool    `json:"limit_buy_to_price_low"`
 		FlagExtremePrices  bool    `json:"flag_extreme_prices"`
+		// Player structures
+		IncludeStructures bool    `json:"include_structures"`
+		StructureIDs      []int64 `json:"structure_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, 400, "invalid json")
@@ -873,7 +1015,7 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 		}
 		historyLabel = fmt.Sprintf("%s +%d jumps", req.SystemName, req.Radius)
 	} else if req.StationID > 0 {
-		// Single station
+		// Single station (NPC or structure)
 		stationIDs[req.StationID] = true
 		regionIDs[req.RegionID] = true
 		historyLabel = fmt.Sprintf("Station %d", req.StationID)
@@ -881,6 +1023,13 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 		// All stations in region
 		regionIDs[req.RegionID] = true
 		historyLabel = fmt.Sprintf("Region %d (all)", req.RegionID)
+	}
+
+	// Merge player structure IDs if requested
+	if req.IncludeStructures && len(req.StructureIDs) > 0 {
+		for _, sid := range req.StructureIDs {
+			stationIDs[sid] = true
+		}
 	}
 
 	log.Printf("[API] ScanStation starting: stations=%d, regions=%d, margin=%.1f, tax=%.1f, broker=%.1f",
@@ -929,6 +1078,24 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 	durationMs := time.Since(startTime).Milliseconds()
 	log.Printf("[API] ScanStation complete: %d results in %dms", len(allResults), durationMs)
 
+	// Resolve structure names if user is authenticated
+	if token, err := s.sessions.EnsureValidToken(s.sso); err == nil {
+		structureIDs := make(map[int64]bool)
+		for _, r := range allResults {
+			if r.StationID >= 100000000 && !(r.StationID >= 60000000 && r.StationID < 64000000) {
+				structureIDs[r.StationID] = true
+			}
+		}
+		if len(structureIDs) > 0 {
+			s.esi.PrefetchStructureNames(structureIDs, token)
+			for i := range allResults {
+				if structureIDs[allResults[i].StationID] {
+					allResults[i].StationName = s.esi.StationName(allResults[i].StationID)
+				}
+			}
+		}
+	}
+
 	// Calculate totals
 	topProfit := 0.0
 	totalProfit := 0.0
@@ -958,9 +1125,22 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetStations(w http.ResponseWriter, r *http.Request) {
+	type stationInfo struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		SystemID    int32  `json:"system_id"`
+		RegionID    int32  `json:"region_id"`
+		IsStructure bool   `json:"is_structure,omitempty"`
+	}
+	type stationsResponse struct {
+		Stations []stationInfo `json:"stations"`
+		RegionID int32         `json:"region_id"`
+		SystemID int32         `json:"system_id"`
+	}
+
 	systemName := strings.TrimSpace(r.URL.Query().Get("system"))
 	if systemName == "" || !s.isReady() {
-		writeJSON(w, []interface{}{})
+		writeJSON(w, stationsResponse{Stations: []stationInfo{}})
 		return
 	}
 
@@ -970,18 +1150,16 @@ func (s *Server) handleGetStations(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 
 	if !ok {
-		writeJSON(w, []interface{}{})
+		writeJSON(w, stationsResponse{Stations: []stationInfo{}})
 		return
 	}
 
-	type stationInfo struct {
-		ID       int64  `json:"id"`
-		Name     string `json:"name"`
-		SystemID int32  `json:"system_id"`
-		RegionID int32  `json:"region_id"`
+	regionID := int32(0)
+	if sys, ok2 := s.sdeData.Systems[systemID]; ok2 {
+		regionID = sys.RegionID
 	}
 
-	// Collect station IDs for this system
+	// Collect NPC station IDs for this system
 	var stationIDs []int64
 	for _, st := range stations {
 		if st.SystemID == systemID {
@@ -996,12 +1174,7 @@ func (s *Server) handleGetStations(w http.ResponseWriter, r *http.Request) {
 	}
 	s.esi.PrefetchStationNames(idMap)
 
-	regionID := int32(0)
-	if sys, ok2 := s.sdeData.Systems[systemID]; ok2 {
-		regionID = sys.RegionID
-	}
-
-	var result []stationInfo
+	result := make([]stationInfo, 0, len(stationIDs))
 	for _, id := range stationIDs {
 		result = append(result, stationInfo{
 			ID:       id,
@@ -1011,6 +1184,61 @@ func (s *Server) handleGetStations(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	writeJSON(w, stationsResponse{
+		Stations: result,
+		RegionID: regionID,
+		SystemID: systemID,
+	})
+}
+
+func (s *Server) handleAuthStructures(w http.ResponseWriter, r *http.Request) {
+	token, err := s.sessions.EnsureValidToken(s.sso)
+	if err != nil {
+		writeError(w, 401, err.Error())
+		return
+	}
+
+	systemIDStr := r.URL.Query().Get("system_id")
+	regionIDStr := r.URL.Query().Get("region_id")
+	if systemIDStr == "" || regionIDStr == "" {
+		writeJSON(w, []interface{}{})
+		return
+	}
+
+	systemID64, err1 := strconv.ParseInt(systemIDStr, 10, 32)
+	regionID64, err2 := strconv.ParseInt(regionIDStr, 10, 32)
+	if err1 != nil || err2 != nil {
+		writeJSON(w, []interface{}{})
+		return
+	}
+	systemID := int32(systemID64)
+	regionID := int32(regionID64)
+
+	structures, err := s.esi.FetchSystemStructures(systemID, regionID, token)
+	if err != nil {
+		log.Printf("[API] FetchSystemStructures error: %v", err)
+		writeJSON(w, []interface{}{})
+		return
+	}
+
+	type stationInfo struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		SystemID    int32  `json:"system_id"`
+		RegionID    int32  `json:"region_id"`
+		IsStructure bool   `json:"is_structure,omitempty"`
+	}
+
+	result := make([]stationInfo, 0, len(structures))
+	for _, st := range structures {
+		result = append(result, stationInfo{
+			ID:          st.ID,
+			Name:        st.Name,
+			SystemID:    st.SystemID,
+			RegionID:    st.RegionID,
+			IsStructure: true,
+		})
+	}
 	writeJSON(w, result)
 }
 

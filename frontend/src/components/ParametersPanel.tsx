@@ -80,9 +80,11 @@ export function ParametersPanel({ params, onChange, isLoggedIn = false, tab = "r
               value={params.system_name}
               onChange={(v) => set("system_name", v)}
               isLoggedIn={isLoggedIn}
+              includeStructures={params.include_structures}
+              onIncludeStructuresChange={(v) => set("include_structures", v)}
             />
           </Field>
-          
+
           {tab === "region" ? (
             <Field label={t("targetRegion") || "Target Region"} hint={t("targetRegionHint")}>
               <RegionAutocomplete
