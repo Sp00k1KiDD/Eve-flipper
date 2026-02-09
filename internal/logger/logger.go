@@ -59,6 +59,20 @@ func colorize(color, text string) string {
 	return color + text + reset
 }
 
+func icon(color, symbol, ascii string) string {
+	if useColors {
+		return colorize(color, symbol)
+	}
+	return ascii
+}
+
+func separator() string {
+	if useColors {
+		return colorize(dim, "───")
+	}
+	return "---"
+}
+
 func timestamp() string {
 	t := time.Now().Format("15:04:05")
 	return colorize(dim, t)
@@ -69,11 +83,24 @@ func Banner(version string) {
 	if version == "" {
 		version = "dev"
 	}
+	fmt.Println()
+	if !useColors {
+		const lineWidth = 39
+		title := "EVE FLIPPER " + version
+		if len(title) > lineWidth {
+			title = title[:lineWidth]
+		}
+		fmt.Println("  +" + strings.Repeat("-", lineWidth) + "+")
+		fmt.Printf("  | %-*s|\n", lineWidth, title)
+		fmt.Printf("  | %-*s|\n", lineWidth, "Market Analysis Tool")
+		fmt.Println("  +" + strings.Repeat("-", lineWidth) + "+")
+		fmt.Println()
+		return
+	}
 	pad := 18 - len(version)
 	if pad < 0 {
 		pad = 0
 	}
-	fmt.Println()
 	fmt.Println(colorize(cyan+bold, "  ╔═══════════════════════════════════════╗"))
 	fmt.Println(colorize(cyan+bold, "  ║") + colorize(yellow+bold, "         EVE FLIPPER ") + colorize(dim, version) + colorize(cyan+bold, strings.Repeat(" ", pad)+"║"))
 	fmt.Println(colorize(cyan+bold, "  ║") + colorize(dim, "      Market Analysis Tool           ") + colorize(cyan+bold, "║"))
@@ -83,35 +110,35 @@ func Banner(version string) {
 
 // Info prints an info message
 func Info(tag, msg string) {
-	icon := colorize(blue, "●")
+	icon := icon(blue, "●", "*")
 	tagStr := colorize(cyan, fmt.Sprintf("[%s]", tag))
 	fmt.Printf("%s %s %s %s\n", timestamp(), icon, tagStr, msg)
 }
 
 // Success prints a success message
 func Success(tag, msg string) {
-	icon := colorize(green, "✓")
+	icon := icon(green, "✓", "+")
 	tagStr := colorize(green, fmt.Sprintf("[%s]", tag))
 	fmt.Printf("%s %s %s %s\n", timestamp(), icon, tagStr, msg)
 }
 
 // Warn prints a warning message
 func Warn(tag, msg string) {
-	icon := colorize(yellow, "⚠")
+	icon := icon(yellow, "⚠", "!")
 	tagStr := colorize(yellow, fmt.Sprintf("[%s]", tag))
 	fmt.Printf("%s %s %s %s\n", timestamp(), icon, tagStr, msg)
 }
 
 // Error prints an error message
 func Error(tag, msg string) {
-	icon := colorize(red, "✗")
+	icon := icon(red, "✗", "x")
 	tagStr := colorize(red, fmt.Sprintf("[%s]", tag))
 	fmt.Printf("%s %s %s %s\n", timestamp(), icon, tagStr, msg)
 }
 
 // Loading prints a loading message (without newline initially)
 func Loading(tag, msg string) {
-	icon := colorize(magenta, "◐")
+	icon := icon(magenta, "◐", "...")
 	tagStr := colorize(magenta, fmt.Sprintf("[%s]", tag))
 	fmt.Printf("%s %s %s %s", timestamp(), icon, tagStr, msg)
 }
@@ -128,7 +155,7 @@ func Done(details string) {
 // Server prints the server listening message
 func Server(addr string) {
 	fmt.Println()
-	icon := colorize(green+bold, "►")
+	icon := icon(green+bold, "►", ">")
 	fmt.Printf("%s %s Server running at %s\n", timestamp(), icon, colorize(cyan+bold, "http://"+addr))
 	fmt.Printf("%s   %s\n", strings.Repeat(" ", 8), colorize(dim, "Press Ctrl+C to stop"))
 	fmt.Println()
@@ -136,10 +163,11 @@ func Server(addr string) {
 
 // Section prints a section header
 func Section(title string) {
-	fmt.Printf("\n%s %s\n", colorize(dim, "───"), colorize(white+bold, title))
+	fmt.Printf("\n%s %s\n", separator(), colorize(white+bold, title))
 }
 
 // Stats prints statistics in a nice format
 func Stats(label string, value interface{}) {
-	fmt.Printf("    %s %s %v\n", colorize(dim, "•"), colorize(dim, label+":"), colorize(white, fmt.Sprint(value)))
+	bullet := icon(dim, "•", "-")
+	fmt.Printf("    %s %s %v\n", bullet, colorize(dim, label+":"), colorize(white, fmt.Sprint(value)))
 }

@@ -121,9 +121,16 @@ type StationTradeParams struct {
 	// --- Price Limits ---
 	LimitBuyToPriceLow bool // Don't buy above P.Low + 10%
 	FlagExtremePrices  bool // Flag anomalous prices
+
 }
 
 // ScanStationTrades finds profitable same-station trading opportunities.
+// isPlayerStructureID checks if a location ID belongs to a player-owned structure.
+// NPC stations: 60,000,000 – 64,000,000. Player structures (Upwell): > 1,000,000,000,000.
+func isPlayerStructureID(id int64) bool {
+	return id > 1_000_000_000_000
+}
+
 func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(string)) ([]StationTrade, error) {
 	progress("Fetching all region orders...")
 
@@ -144,6 +151,14 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 		// Filter to allowed stations (if specified)
 		if filterStations {
 			if _, ok := params.StationIDs[o.LocationID]; !ok {
+				continue
+			}
+		} else {
+			// In "all stations in region" mode, skip player structures
+			// unless they were explicitly included via StationIDs.
+			// This prevents processing hundreds of thousands of structure
+			// orders that would be filtered out later anyway.
+			if isPlayerStructureID(o.LocationID) {
 				continue
 			}
 		}
@@ -258,10 +273,10 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 		ci := CalcCI(append(g.buyOrders, g.sellOrders...))
 		obds := CalcOBDS(g.buyOrders, g.sellOrders, capitalRequired)
 
-		// NowROI = profit per unit / our cost per unit (ask) * 100
+		// NowROI = profit per unit / effective cost per unit (including broker fee) * 100
 		nowROI := 0.0
-		if costToBuy > 0 {
-			nowROI = profitPerUnit / costToBuy * 100
+		if effectiveBuy > 0 {
+			nowROI = profitPerUnit / effectiveBuy * 100
 		}
 
 		results = append(results, StationTrade{
@@ -301,16 +316,9 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 		return stationSortProxy(&results[i]) > stationSortProxy(&results[j])
 	})
 
-	// Use a larger internal working set for history enrichment so that good items
-	// with moderate margins aren't discarded before we know their daily volume.
-	// After enrichment + filters we truncate to the user's requested limit.
-	userLimit := EffectiveMaxResults(params.MaxResults, DefaultMaxResults)
-	internalLimit := userLimit * 5
-	if internalLimit < 500 {
-		internalLimit = 500
-	}
-	if len(results) > internalLimit {
-		results = results[:internalLimit]
+	// Cap internal working set for history enrichment to prevent server overload
+	if len(results) > MaxUnlimitedResults {
+		results = results[:MaxUnlimitedResults]
 	}
 
 	// Expected fill prices from execution plan — per unit of volume.
@@ -366,11 +374,6 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 
 	log.Printf("[DEBUG] StationTrades: %d after all filters", len(results))
 
-	// Truncate to user-requested limit (was deferred to let filters work on a larger set)
-	if len(results) > userLimit {
-		results = results[:userLimit]
-	}
-
 	// Final sort by CTS (Composite Trading Score) descending
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].CTS > results[j].CTS
@@ -382,7 +385,7 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 
 // applyStationTradeFilters applies post-history filters based on params.
 func applyStationTradeFilters(results []StationTrade, params StationTradeParams) []StationTrade {
-	filtered := results[:0]
+	filtered := make([]StationTrade, 0, len(results))
 
 	// Debug counters
 	var dropVol, dropDemand, dropROI, dropBvS, dropPVI, dropSDS, dropPrice int
@@ -461,7 +464,7 @@ func (s *Scanner) enrichStationWithHistory(results []StationTrade, regionID int3
 		stats   esi.MarketStats
 	}
 	ch := make(chan histResult, len(results))
-	sem := make(chan struct{}, 10)
+	sem := make(chan struct{}, 20)
 
 	for i := range results {
 		sem <- struct{}{}
@@ -526,9 +529,18 @@ func (s *Scanner) enrichStationWithHistory(results []StationTrade, regionID int3
 		// sell throughput is lower.
 		results[idx].SellUnitsPerDay = dailyVol
 		if results[idx].BuyVolume > 0 && results[idx].SellVolume > 0 {
-			// Adjust by supply ratio: if there are fewer sell orders, sell throughput is lower
+			// Adjust by supply ratio: if there are fewer sell orders, sell throughput is lower.
+			// ratio = sellVol / (buyVol + sellVol), range [0, 1].
+			// When ratio = 0.5 (balanced book), sellUnitsPerDay ≈ dailyVol.
+			// When ratio < 0.5 (sell-scarce), sellUnitsPerDay < dailyVol.
+			// When ratio > 0.5 (sell-heavy), sellUnitsPerDay still capped at dailyVol
+			// because actual throughput cannot exceed historical daily volume.
 			supplyRatio := float64(results[idx].SellVolume) / float64(results[idx].BuyVolume+results[idx].SellVolume)
-			results[idx].SellUnitsPerDay = dailyVol * supplyRatio * 2 // *2 because ratio is 0-1 centered at 0.5
+			adjusted := dailyVol * supplyRatio / 0.5 // normalize so ratio=0.5 → 1.0×
+			if adjusted > dailyVol {
+				adjusted = dailyVol // cap: can't sell more than market actually trades
+			}
+			results[idx].SellUnitsPerDay = adjusted
 		}
 
 		// B v S Ratio
@@ -562,5 +574,6 @@ func (s *Scanner) enrichStationWithHistory(results []StationTrade, regionID int3
 			results[idx].SDS,
 			results[idx].BuyUnitsPerDay,
 		))
+
 	}
 }
