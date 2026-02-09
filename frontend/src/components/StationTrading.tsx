@@ -1,6 +1,18 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import type { StationTrade, StationInfo, ScanParams, WatchlistItem } from "@/lib/types";
-import { getStations, getStructures, scanStation, getWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/api";
+import type {
+  StationTrade,
+  StationInfo,
+  ScanParams,
+  WatchlistItem,
+} from "@/lib/types";
+import {
+  getStations,
+  getStructures,
+  scanStation,
+  getWatchlist,
+  addToWatchlist,
+  removeFromWatchlist,
+} from "@/lib/api";
 import { formatISK, formatMargin, formatNumber } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { MetricTooltip } from "./Tooltip";
@@ -17,7 +29,10 @@ import {
 } from "./TabSettingsPanel";
 import { SystemAutocomplete } from "./SystemAutocomplete";
 import { PresetPicker } from "./PresetPicker";
-import { STATION_BUILTIN_PRESETS, type StationTradingSettings } from "@/lib/presets";
+import {
+  STATION_BUILTIN_PRESETS,
+  type StationTradingSettings,
+} from "@/lib/presets";
 
 type SortKey = keyof StationTrade;
 type SortDir = "asc" | "desc";
@@ -32,7 +47,16 @@ interface Props {
 }
 
 // Metric tooltip keys mapping
-type MetricTooltipKey = "CTS" | "SDS" | "PVI" | "VWAP" | "OBDS" | "DOS" | "BvSRatio" | "PeriodROI" | "NowROI";
+type MetricTooltipKey =
+  | "CTS"
+  | "SDS"
+  | "PVI"
+  | "VWAP"
+  | "OBDS"
+  | "DOS"
+  | "BvSRatio"
+  | "PeriodROI"
+  | "NowROI";
 
 const metricTooltipKeys: Partial<Record<SortKey, MetricTooltipKey>> = {
   CTS: "CTS",
@@ -46,28 +70,74 @@ const metricTooltipKeys: Partial<Record<SortKey, MetricTooltipKey>> = {
   NowROI: "NowROI",
 };
 
-const columnDefs: { key: SortKey; labelKey: TranslationKey; width: string; numeric: boolean }[] = [
-  { key: "TypeName", labelKey: "colItem", width: "min-w-[150px]", numeric: false },
-  { key: "StationName", labelKey: "colStationName", width: "min-w-[150px]", numeric: false },
+const columnDefs: {
+  key: SortKey;
+  labelKey: TranslationKey;
+  width: string;
+  numeric: boolean;
+}[] = [
+  {
+    key: "TypeName",
+    labelKey: "colItem",
+    width: "min-w-[150px]",
+    numeric: false,
+  },
+  {
+    key: "StationName",
+    labelKey: "colStationName",
+    width: "min-w-[150px]",
+    numeric: false,
+  },
   { key: "CTS", labelKey: "colCTS", width: "min-w-[60px]", numeric: true },
-  { key: "ProfitPerUnit", labelKey: "colProfitPerUnit", width: "min-w-[90px]", numeric: true },
-  { key: "MarginPercent", labelKey: "colMargin", width: "min-w-[70px]", numeric: true },
-  { key: "PeriodROI", labelKey: "colPeriodROI", width: "min-w-[80px]", numeric: true },
-  { key: "BuyUnitsPerDay", labelKey: "colBuyPerDay", width: "min-w-[80px]", numeric: true },
+  {
+    key: "ProfitPerUnit",
+    labelKey: "colProfitPerUnit",
+    width: "min-w-[90px]",
+    numeric: true,
+  },
+  {
+    key: "MarginPercent",
+    labelKey: "colMargin",
+    width: "min-w-[70px]",
+    numeric: true,
+  },
+  {
+    key: "PeriodROI",
+    labelKey: "colPeriodROI",
+    width: "min-w-[80px]",
+    numeric: true,
+  },
+  {
+    key: "BuyUnitsPerDay",
+    labelKey: "colBuyPerDay",
+    width: "min-w-[80px]",
+    numeric: true,
+  },
   { key: "BvSRatio", labelKey: "colBvS", width: "min-w-[60px]", numeric: true },
   { key: "DOS", labelKey: "colDOS", width: "min-w-[60px]", numeric: true },
   { key: "SDS", labelKey: "colSDS", width: "min-w-[50px]", numeric: true },
-  { key: "TotalProfit", labelKey: "colDailyProfit", width: "min-w-[100px]", numeric: true },
+  {
+    key: "TotalProfit",
+    labelKey: "colDailyProfit",
+    width: "min-w-[100px]",
+    numeric: true,
+  },
 ];
 
 // Sentinel value for "All stations"
 const ALL_STATIONS_ID = 0;
 
-export function StationTrading({ params, onChange, isLoggedIn = false, loadedResults }: Props) {
+export function StationTrading({
+  params,
+  onChange,
+  isLoggedIn = false,
+  loadedResults,
+}: Props) {
   const { t } = useI18n();
 
   const [stations, setStations] = useState<StationInfo[]>([]);
-  const [selectedStationId, setSelectedStationId] = useState<number>(ALL_STATIONS_ID);
+  const [selectedStationId, setSelectedStationId] =
+    useState<number>(ALL_STATIONS_ID);
   const [brokerFee, setBrokerFee] = useState(3.0);
   const [salesTaxPercent, setSalesTaxPercent] = useState(8);
   const [radius, setRadius] = useState(0);
@@ -111,7 +181,11 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   const [execPlanRow, setExecPlanRow] = useState<StationTrade | null>(null);
 
   // Context menu (right-click)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; row: StationTrade } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    row: StationTrade;
+  } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set());
 
@@ -126,9 +200,14 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   const { addToast } = useGlobalToast();
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   useEffect(() => {
-    getWatchlist().then(setWatchlist).catch(() => {});
+    getWatchlist()
+      .then(setWatchlist)
+      .catch(() => {});
   }, []);
-  const watchlistIds = useMemo(() => new Set(watchlist.map((w) => w.type_id)), [watchlist]);
+  const watchlistIds = useMemo(
+    () => new Set(watchlist.map((w) => w.type_id)),
+    [watchlist],
+  );
 
   // Current settings object for preset system
   const stationSettings = useMemo<StationTradingSettings>(
@@ -148,29 +227,46 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
       limitBuyToPriceLow,
       flagExtremePrices,
     }),
-    [brokerFee, salesTaxPercent, radius, minDailyVolume, minItemProfit, minDemandPerDay, avgPricePeriod, minPeriodROI, bvsRatioMin, bvsRatioMax, maxPVI, maxSDS, limitBuyToPriceLow, flagExtremePrices],
+    [
+      brokerFee,
+      salesTaxPercent,
+      radius,
+      minDailyVolume,
+      minItemProfit,
+      minDemandPerDay,
+      avgPricePeriod,
+      minPeriodROI,
+      bvsRatioMin,
+      bvsRatioMax,
+      maxPVI,
+      maxSDS,
+      limitBuyToPriceLow,
+      flagExtremePrices,
+    ],
   );
 
-  const handlePresetApply = useCallback(
-    (s: Record<string, any>) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-      const st = s as StationTradingSettings;
-      if (st.brokerFee !== undefined) setBrokerFee(st.brokerFee);
-      if (st.salesTaxPercent !== undefined) setSalesTaxPercent(st.salesTaxPercent);
-      if (st.radius !== undefined) setRadius(st.radius);
-      if (st.minDailyVolume !== undefined) setMinDailyVolume(st.minDailyVolume);
-      if (st.minItemProfit !== undefined) setMinItemProfit(st.minItemProfit);
-      if (st.minDemandPerDay !== undefined) setMinDemandPerDay(st.minDemandPerDay);
-      if (st.avgPricePeriod !== undefined) setAvgPricePeriod(st.avgPricePeriod);
-      if (st.minPeriodROI !== undefined) setMinPeriodROI(st.minPeriodROI);
-      if (st.bvsRatioMin !== undefined) setBvsRatioMin(st.bvsRatioMin);
-      if (st.bvsRatioMax !== undefined) setBvsRatioMax(st.bvsRatioMax);
-      if (st.maxPVI !== undefined) setMaxPVI(st.maxPVI);
-      if (st.maxSDS !== undefined) setMaxSDS(st.maxSDS);
-      if (st.limitBuyToPriceLow !== undefined) setLimitBuyToPriceLow(st.limitBuyToPriceLow);
-      if (st.flagExtremePrices !== undefined) setFlagExtremePrices(st.flagExtremePrices);
-    },
-    [],
-  );
+  const handlePresetApply = useCallback((s: Record<string, any>) => {
+    // eslint-disable-line @typescript-eslint/no-explicit-any
+    const st = s as StationTradingSettings;
+    if (st.brokerFee !== undefined) setBrokerFee(st.brokerFee);
+    if (st.salesTaxPercent !== undefined)
+      setSalesTaxPercent(st.salesTaxPercent);
+    if (st.radius !== undefined) setRadius(st.radius);
+    if (st.minDailyVolume !== undefined) setMinDailyVolume(st.minDailyVolume);
+    if (st.minItemProfit !== undefined) setMinItemProfit(st.minItemProfit);
+    if (st.minDemandPerDay !== undefined)
+      setMinDemandPerDay(st.minDemandPerDay);
+    if (st.avgPricePeriod !== undefined) setAvgPricePeriod(st.avgPricePeriod);
+    if (st.minPeriodROI !== undefined) setMinPeriodROI(st.minPeriodROI);
+    if (st.bvsRatioMin !== undefined) setBvsRatioMin(st.bvsRatioMin);
+    if (st.bvsRatioMax !== undefined) setBvsRatioMax(st.bvsRatioMax);
+    if (st.maxPVI !== undefined) setMaxPVI(st.maxPVI);
+    if (st.maxSDS !== undefined) setMaxSDS(st.maxSDS);
+    if (st.limitBuyToPriceLow !== undefined)
+      setLimitBuyToPriceLow(st.limitBuyToPriceLow);
+    if (st.flagExtremePrices !== undefined)
+      setFlagExtremePrices(st.flagExtremePrices);
+  }, []);
 
   // Sync sales tax from global params when they change (e.g. from ParametersPanel on other tabs)
   useEffect(() => {
@@ -222,7 +318,10 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   // Region ID comes from system metadata, not from stations
   const regionId = systemRegionId;
 
-  const canScan = params.system_name && (allStations.length > 0 || radius > 0) && regionId > 0;
+  const canScan =
+    params.system_name &&
+    (allStations.length > 0 || radius > 0) &&
+    regionId > 0;
 
   function stationRowKey(row: StationTrade) {
     return `${row.TypeID}-${row.StationID}`;
@@ -243,7 +342,7 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
       addToast(t("copied"), "success", 2000);
       setContextMenu(null);
     },
-    [addToast, t]
+    [addToast, t],
   );
 
   // Keep context menu inside viewport
@@ -254,8 +353,10 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
       const padding = 10;
       let x = contextMenu.x;
       let y = contextMenu.y;
-      if (x + rect.width > window.innerWidth - padding) x = window.innerWidth - rect.width - padding;
-      if (y + rect.height > window.innerHeight - padding) y = window.innerHeight - rect.height - padding;
+      if (x + rect.width > window.innerWidth - padding)
+        x = window.innerWidth - rect.width - padding;
+      if (y + rect.height > window.innerHeight - padding)
+        y = window.innerHeight - rect.height - padding;
       x = Math.max(padding, x);
       y = Math.max(padding, y);
       menu.style.left = `${x}px`;
@@ -281,7 +382,6 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
         sales_tax_percent: salesTaxPercent,
         broker_fee: brokerFee,
         min_daily_volume: minDailyVolume,
-        max_results: params.max_results,
         // EVE Guru Profit Filters
         min_item_profit: minItemProfit > 0 ? minItemProfit : undefined,
         min_demand_per_day: minDemandPerDay > 0 ? minDemandPerDay : undefined,
@@ -325,9 +425,30 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
     } finally {
       setScanning(false);
     }
-  }, [scanning, canScan, selectedStationId, regionId, params, brokerFee, salesTaxPercent, radius, minDailyVolume,
-      minItemProfit, minDemandPerDay, avgPricePeriod, minPeriodROI, bvsRatioMin, bvsRatioMax,
-      maxPVI, maxSDS, limitBuyToPriceLow, flagExtremePrices, includeStructures, structureStations, t]);
+  }, [
+    scanning,
+    canScan,
+    selectedStationId,
+    regionId,
+    params,
+    brokerFee,
+    salesTaxPercent,
+    radius,
+    minDailyVolume,
+    minItemProfit,
+    minDemandPerDay,
+    avgPricePeriod,
+    minPeriodROI,
+    bvsRatioMin,
+    bvsRatioMax,
+    maxPVI,
+    maxSDS,
+    limitBuyToPriceLow,
+    flagExtremePrices,
+    includeStructures,
+    structureStations,
+    t,
+  ]);
 
   const sorted = useMemo(() => {
     const copy = [...results];
@@ -346,25 +467,46 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("desc"); }
+    else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
   };
 
   const summary = useMemo(() => {
     if (sorted.length === 0) return null;
     const totalProfit = sorted.reduce((sum, r) => sum + r.TotalProfit, 0);
-    const avgMargin = sorted.reduce((sum, r) => sum + r.MarginPercent, 0) / sorted.length;
+    const avgMargin =
+      sorted.reduce((sum, r) => sum + r.MarginPercent, 0) / sorted.length;
     const avgCTS = sorted.reduce((sum, r) => sum + r.CTS, 0) / sorted.length;
     return { totalProfit, avgMargin, avgCTS, count: sorted.length };
   }, [sorted]);
 
-  const formatCell = (col: (typeof columnDefs)[number], row: StationTrade): string => {
+  const formatCell = (
+    col: (typeof columnDefs)[number],
+    row: StationTrade,
+  ): string => {
     const val = row[col.key];
-    if (col.key === "BuyPrice" || col.key === "SellPrice" || col.key === "Spread" || col.key === "TotalProfit" || col.key === "ProfitPerUnit" || col.key === "CapitalRequired" || col.key === "VWAP") {
+    if (
+      col.key === "BuyPrice" ||
+      col.key === "SellPrice" ||
+      col.key === "Spread" ||
+      col.key === "TotalProfit" ||
+      col.key === "ProfitPerUnit" ||
+      col.key === "CapitalRequired" ||
+      col.key === "VWAP"
+    ) {
       const n = val as number | undefined;
-      return n != null && Number.isFinite(n) ? formatISK(n) : "";
+      return n != null && Number.isFinite(n) ? formatISK(n) : "\u2014";
     }
-    if (col.key === "MarginPercent" || col.key === "NowROI" || col.key === "PeriodROI" || col.key === "PVI") {
-      return formatMargin(val as number);
+    if (
+      col.key === "MarginPercent" ||
+      col.key === "NowROI" ||
+      col.key === "PeriodROI" ||
+      col.key === "PVI"
+    ) {
+      const n = val as number | undefined;
+      return n != null && Number.isFinite(n) ? formatMargin(n) : "\u2014";
     }
     if (col.key === "BvSRatio" || col.key === "DOS" || col.key === "OBDS") {
       return (val as number).toFixed(2);
@@ -420,7 +562,14 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
           icon="🏪"
           defaultExpanded={true}
           persistKey="station"
-          help={{ stepKeys: ["helpStationStep1", "helpStationStep2", "helpStationStep3"], wikiSlug: "Station-Trading" }}
+          help={{
+            stepKeys: [
+              "helpStationStep1",
+              "helpStationStep2",
+              "helpStationStep3",
+            ],
+            wikiSlug: "Station-Trading",
+          }}
           headerExtra={
             <PresetPicker
               params={stationSettings}
@@ -444,7 +593,9 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
             <SettingsField label={t("stationSelect")}>
               {loadingStations || loadingStructures ? (
                 <div className="h-[34px] flex items-center text-xs text-eve-dim">
-                  {loadingStructures ? t("loadingStructures") : t("loadingStations")}
+                  {loadingStructures
+                    ? t("loadingStructures")
+                    : t("loadingStations")}
                 </div>
               ) : allStations.length === 0 ? (
                 <div className="h-[34px] flex items-center text-xs text-eve-dim">
@@ -493,7 +644,9 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
             <SettingsField label={t("salesTax")}>
               <SettingsNumberInput
                 value={salesTaxPercent}
-                onChange={(v) => setSalesTaxPercent(Math.max(0, Math.min(100, v)))}
+                onChange={(v) =>
+                  setSalesTaxPercent(Math.max(0, Math.min(100, v)))
+                }
                 min={0}
                 max={100}
                 step={0.1}
@@ -520,40 +673,81 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
           {/* Advanced Filters - collapsible subsection */}
           <details className="mt-3 group">
             <summary className="cursor-pointer text-xs text-eve-dim hover:text-eve-accent transition-colors flex items-center gap-1">
-              <span className="group-open:rotate-90 transition-transform">▶</span>
+              <span className="group-open:rotate-90 transition-transform">
+                ▶
+              </span>
               {t("advancedFilters")}
             </summary>
             <div className="mt-3 pt-3 border-t border-eve-border/30">
               <SettingsGrid cols={5}>
                 <SettingsField label={t("minDemandPerDay")}>
-                  <SettingsNumberInput value={minDemandPerDay} onChange={setMinDemandPerDay} min={0} step={0.1} />
+                  <SettingsNumberInput
+                    value={minDemandPerDay}
+                    onChange={setMinDemandPerDay}
+                    min={0}
+                    step={0.1}
+                  />
                 </SettingsField>
                 <SettingsField label={t("avgPricePeriod")}>
-                  <SettingsNumberInput value={avgPricePeriod} onChange={setAvgPricePeriod} min={7} max={365} />
+                  <SettingsNumberInput
+                    value={avgPricePeriod}
+                    onChange={setAvgPricePeriod}
+                    min={7}
+                    max={365}
+                  />
                 </SettingsField>
                 <SettingsField label={t("minPeriodROI")}>
-                  <SettingsNumberInput value={minPeriodROI} onChange={setMinPeriodROI} min={0} />
+                  <SettingsNumberInput
+                    value={minPeriodROI}
+                    onChange={setMinPeriodROI}
+                    min={0}
+                  />
                 </SettingsField>
                 <SettingsField label={t("maxPVI")}>
-                  <SettingsNumberInput value={maxPVI} onChange={setMaxPVI} min={0} />
+                  <SettingsNumberInput
+                    value={maxPVI}
+                    onChange={setMaxPVI}
+                    min={0}
+                  />
                 </SettingsField>
                 <SettingsField label={t("maxSDS")}>
-                  <SettingsNumberInput value={maxSDS} onChange={setMaxSDS} min={0} max={100} />
+                  <SettingsNumberInput
+                    value={maxSDS}
+                    onChange={setMaxSDS}
+                    min={0}
+                    max={100}
+                  />
                 </SettingsField>
               </SettingsGrid>
               <div className="mt-3">
                 <SettingsGrid cols={4}>
                   <SettingsField label={t("bvsRatioMin")}>
-                    <SettingsNumberInput value={bvsRatioMin} onChange={setBvsRatioMin} min={0} step={0.1} />
+                    <SettingsNumberInput
+                      value={bvsRatioMin}
+                      onChange={setBvsRatioMin}
+                      min={0}
+                      step={0.1}
+                    />
                   </SettingsField>
                   <SettingsField label={t("bvsRatioMax")}>
-                    <SettingsNumberInput value={bvsRatioMax} onChange={setBvsRatioMax} min={0} step={0.1} />
+                    <SettingsNumberInput
+                      value={bvsRatioMax}
+                      onChange={setBvsRatioMax}
+                      min={0}
+                      step={0.1}
+                    />
                   </SettingsField>
                   <SettingsField label={t("limitBuyToPriceLow")}>
-                    <SettingsCheckbox checked={limitBuyToPriceLow} onChange={setLimitBuyToPriceLow} />
+                    <SettingsCheckbox
+                      checked={limitBuyToPriceLow}
+                      onChange={setLimitBuyToPriceLow}
+                    />
                   </SettingsField>
                   <SettingsField label={t("flagExtremePrices")}>
-                    <SettingsCheckbox checked={flagExtremePrices} onChange={setFlagExtremePrices} />
+                    <SettingsCheckbox
+                      checked={flagExtremePrices}
+                      onChange={setFlagExtremePrices}
+                    />
                   </SettingsField>
                 </SettingsGrid>
               </div>
@@ -566,9 +760,10 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
               onClick={handleScan}
               disabled={!canScan}
               className={`px-5 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider transition-all
-                ${scanning
-                  ? "bg-eve-error/80 text-white hover:bg-eve-error"
-                  : "bg-eve-accent text-eve-dark hover:bg-eve-accent-hover shadow-eve-glow"
+                ${
+                  scanning
+                    ? "bg-eve-error/80 text-white hover:bg-eve-error"
+                    : "bg-eve-accent text-eve-dark hover:bg-eve-accent-hover shadow-eve-glow"
                 }
                 disabled:bg-eve-input disabled:text-eve-dim disabled:cursor-not-allowed disabled:shadow-none`}
             >
@@ -601,7 +796,12 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
           <thead className="sticky top-0 z-10">
             <tr className="bg-eve-dark border-b border-eve-border">
               <th className="min-w-[24px] px-1 py-2"></th>
-              <th className="min-w-[32px] px-1 py-2 text-center text-[10px] uppercase tracking-wider text-eve-dim" title={t("execPlanTitle")}>📊</th>
+              <th
+                className="min-w-[32px] px-1 py-2 text-center text-[10px] uppercase tracking-wider text-eve-dim"
+                title={t("execPlanTitle")}
+              >
+                📊
+              </th>
               {columnDefs.map((col) => {
                 const tooltipKey = metricTooltipKeys[col.key];
                 return (
@@ -617,7 +817,9 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
                     <span className="inline-flex items-center">
                       {t(col.labelKey)}
                       {sortKey === col.key && (
-                        <span className="ml-1">{sortDir === "asc" ? "▲" : "▼"}</span>
+                        <span className="ml-1">
+                          {sortDir === "asc" ? "▲" : "▼"}
+                        </span>
                       )}
                       {tooltipKey && (
                         <MetricTooltipContent metricKey={tooltipKey} t={t} />
@@ -640,7 +842,11 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
               >
                 {/* Risk indicator */}
                 <td className="px-1 py-1 text-center">
-                  {row.IsHighRiskFlag ? "🚨" : row.IsExtremePriceFlag ? "⚠️" : ""}
+                  {row.IsHighRiskFlag
+                    ? "🚨"
+                    : row.IsExtremePriceFlag
+                      ? "⚠️"
+                      : ""}
                 </td>
                 <td className="px-1 py-1 text-center">
                   {regionId > 0 && (
@@ -658,9 +864,13 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
                   <td
                     key={col.key}
                     className={`px-2 py-1 ${col.width} truncate ${
-                      col.key === "CTS" ? `font-mono font-bold ${getCTSColor(row.CTS)}` :
-                      col.key === "SDS" ? `font-mono ${getSDSColor(row.SDS)}` :
-                      col.numeric ? "text-eve-accent font-mono" : "text-eve-text"
+                      col.key === "CTS"
+                        ? `font-mono font-bold ${getCTSColor(row.CTS)}`
+                        : col.key === "SDS"
+                          ? `font-mono ${getSDSColor(row.SDS)}`
+                          : col.numeric
+                            ? "text-eve-accent font-mono"
+                            : "text-eve-text"
                     }`}
                   >
                     {formatCell(col, row)}
@@ -684,15 +894,23 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
         <div className="shrink-0 flex items-center gap-6 px-3 py-1.5 border-t border-eve-border text-xs">
           <span className="text-eve-dim">
             {t("totalProfit")}:{" "}
-            <span className="text-eve-accent font-mono font-semibold">{formatISK(summary.totalProfit)}</span>
+            <span className="text-eve-accent font-mono font-semibold">
+              {formatISK(summary.totalProfit)}
+            </span>
           </span>
           <span className="text-eve-dim">
             {t("avgMargin")}:{" "}
-            <span className="text-eve-accent font-mono font-semibold">{formatMargin(summary.avgMargin)}</span>
+            <span className="text-eve-accent font-mono font-semibold">
+              {formatMargin(summary.avgMargin)}
+            </span>
           </span>
           <span className="text-eve-dim">
             {t("avgCTS")}:{" "}
-            <span className={`font-mono font-semibold ${getCTSColor(summary.avgCTS)}`}>{summary.avgCTS.toFixed(1)}</span>
+            <span
+              className={`font-mono font-semibold ${getCTSColor(summary.avgCTS)}`}
+            >
+              {summary.avgCTS.toFixed(1)}
+            </span>
           </span>
         </div>
       )}
@@ -700,51 +918,79 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
       {/* Context menu (right-click) */}
       {contextMenu && (
         <>
-          <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} />
+          <div
+            className="fixed inset-0 z-50"
+            onClick={() => setContextMenu(null)}
+          />
           <div
             ref={contextMenuRef}
             className="fixed z-50 bg-eve-panel border border-eve-border rounded-sm shadow-eve-glow-strong py-1 min-w-[200px]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            <ContextItem label={t("copyItem")} onClick={() => copyText(contextMenu.row.TypeName ?? "")} />
-            <ContextItem label={t("copyBuyStation")} onClick={() => copyText(contextMenu.row.StationName ?? "")} />
+            <ContextItem
+              label={t("copyItem")}
+              onClick={() => copyText(contextMenu.row.TypeName ?? "")}
+            />
+            <ContextItem
+              label={t("copyBuyStation")}
+              onClick={() => copyText(contextMenu.row.StationName ?? "")}
+            />
             <ContextItem
               label={t("copyTradeRoute")}
-              onClick={() => copyText(`${contextMenu.row.TypeName} @ ${contextMenu.row.StationName}`)}
+              onClick={() =>
+                copyText(
+                  `${contextMenu.row.TypeName} @ ${contextMenu.row.StationName}`,
+                )
+              }
             />
             <div className="h-px bg-eve-border my-1" />
             <ContextItem
               label={t("openInEveref")}
               onClick={() => {
-                window.open(`https://everef.net/type/${contextMenu.row.TypeID}`, "_blank");
+                window.open(
+                  `https://everef.net/type/${contextMenu.row.TypeID}`,
+                  "_blank",
+                );
                 setContextMenu(null);
               }}
             />
             <ContextItem
               label={t("openInJitaSpace")}
               onClick={() => {
-                window.open(`https://www.jita.space/market/${contextMenu.row.TypeID}`, "_blank");
+                window.open(
+                  `https://www.jita.space/market/${contextMenu.row.TypeID}`,
+                  "_blank",
+                );
                 setContextMenu(null);
               }}
             />
             <div className="h-px bg-eve-border my-1" />
             <ContextItem
-              label={watchlistIds.has(contextMenu.row.TypeID) ? t("removeFromWatchlist") : `⭐ ${t("addToWatchlist")}`}
+              label={
+                watchlistIds.has(contextMenu.row.TypeID)
+                  ? t("removeFromWatchlist")
+                  : `⭐ ${t("addToWatchlist")}`
+              }
               onClick={() => {
                 const row = contextMenu.row;
                 if (watchlistIds.has(row.TypeID)) {
                   removeFromWatchlist(row.TypeID)
                     .then(setWatchlist)
-                    .then(() => addToast(t("watchlistRemoved"), "success", 2000))
+                    .then(() =>
+                      addToast(t("watchlistRemoved"), "success", 2000),
+                    )
                     .catch(() => addToast(t("watchlistError"), "error", 3000));
                 } else {
                   addToWatchlist(row.TypeID, row.TypeName)
                     .then((r) => {
                       setWatchlist(r.items);
-                      addToast(r.inserted
-                        ? t("watchlistItemAdded")
-                        : t("watchlistAlready"),
-                        r.inserted ? "success" : "info", 2000);
+                      addToast(
+                        r.inserted
+                          ? t("watchlistItemAdded")
+                          : t("watchlistAlready"),
+                        r.inserted ? "success" : "info",
+                        2000,
+                      );
                     })
                     .catch(() => addToast(t("watchlistError"), "error", 3000));
                 }
@@ -752,7 +998,11 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
               }}
             />
             <ContextItem
-              label={pinnedKeys.has(stationRowKey(contextMenu.row)) ? t("unpinRow") : t("pinRow")}
+              label={
+                pinnedKeys.has(stationRowKey(contextMenu.row))
+                  ? t("unpinRow")
+                  : t("pinRow")
+              }
               onClick={() => {
                 togglePin(stationRowKey(contextMenu.row));
                 setContextMenu(null);
@@ -787,7 +1037,13 @@ export function StationTrading({ params, onChange, isLoggedIn = false, loadedRes
   );
 }
 
-function ContextItem({ label, onClick }: { label: string; onClick: () => void }) {
+function ContextItem({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <div
       onClick={onClick}
@@ -799,27 +1055,63 @@ function ContextItem({ label, onClick }: { label: string; onClick: () => void })
 }
 
 // Helper component for metric tooltips
-function MetricTooltipContent({ 
-  metricKey, 
-  t 
-}: { 
-  metricKey: MetricTooltipKey; 
+function MetricTooltipContent({
+  metricKey,
+  t,
+}: {
+  metricKey: MetricTooltipKey;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }) {
-  const tooltipData: Record<MetricTooltipKey, { titleKey: TranslationKey; descKey: TranslationKey; goodKey?: TranslationKey; badKey?: TranslationKey }> = {
-    CTS: { titleKey: "metricCTSTitle", descKey: "metricCTSDesc", goodKey: "metricCTSGood", badKey: "metricCTSBad" },
-    SDS: { titleKey: "metricSDSTitle", descKey: "metricSDSDesc", goodKey: "metricSDSGood", badKey: "metricSDSBad" },
-    PVI: { titleKey: "metricPVITitle", descKey: "metricPVIDesc", goodKey: "metricPVIGood", badKey: "metricPVIBad" },
+  const tooltipData: Record<
+    MetricTooltipKey,
+    {
+      titleKey: TranslationKey;
+      descKey: TranslationKey;
+      goodKey?: TranslationKey;
+      badKey?: TranslationKey;
+    }
+  > = {
+    CTS: {
+      titleKey: "metricCTSTitle",
+      descKey: "metricCTSDesc",
+      goodKey: "metricCTSGood",
+      badKey: "metricCTSBad",
+    },
+    SDS: {
+      titleKey: "metricSDSTitle",
+      descKey: "metricSDSDesc",
+      goodKey: "metricSDSGood",
+      badKey: "metricSDSBad",
+    },
+    PVI: {
+      titleKey: "metricPVITitle",
+      descKey: "metricPVIDesc",
+      goodKey: "metricPVIGood",
+      badKey: "metricPVIBad",
+    },
     VWAP: { titleKey: "metricVWAPTitle", descKey: "metricVWAPDesc" },
     OBDS: { titleKey: "metricOBDSTitle", descKey: "metricOBDSDesc" },
-    DOS: { titleKey: "metricDOSTitle", descKey: "metricDOSDesc", goodKey: "metricDOSGood", badKey: "metricDOSBad" },
-    BvSRatio: { titleKey: "metricBvSTitle", descKey: "metricBvSDesc", goodKey: "metricBvSGood", badKey: "metricBvSBad" },
-    PeriodROI: { titleKey: "metricPeriodROITitle", descKey: "metricPeriodROIDesc" },
+    DOS: {
+      titleKey: "metricDOSTitle",
+      descKey: "metricDOSDesc",
+      goodKey: "metricDOSGood",
+      badKey: "metricDOSBad",
+    },
+    BvSRatio: {
+      titleKey: "metricBvSTitle",
+      descKey: "metricBvSDesc",
+      goodKey: "metricBvSGood",
+      badKey: "metricBvSBad",
+    },
+    PeriodROI: {
+      titleKey: "metricPeriodROITitle",
+      descKey: "metricPeriodROIDesc",
+    },
     NowROI: { titleKey: "metricNowROITitle", descKey: "metricNowROIDesc" },
   };
 
   const data = tooltipData[metricKey];
-  
+
   return (
     <MetricTooltip
       title={t(data.titleKey)}
