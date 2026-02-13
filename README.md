@@ -1,180 +1,97 @@
-<div align="center">
+# EVE Flipper
 
-# 🚀 EVE Flipper
+EVE Flipper is a local-first market analysis platform for EVE Online traders.  
+It combines real-time ESI data, historical market behavior, and execution-aware math to surface actionable opportunities across station trading, regional arbitrage, contracts, routes, industry, and PLEX.
 
-### *The Ultimate Market Tool for EVE Online Traders*
+## Core Capabilities
 
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://go.dev/)
-[![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+### Trading Scanners
+- `Radius Scan`: local buy/sell opportunities within jump constraints.
+- `Region Arbitrage`: cross-region spreads and hauling candidates.
+- `Route Trading`: multi-hop route search with cross-region support.
+- `Station Trading`: same-station opportunities with liquidity and risk metrics.
+- `Contract Scanner`: contract arbitrage in two modes:
+  - `Instant liquidation` (buy now, liquidate now)
+  - `Horizon mode` (expected profit with hold days and confidence target)
 
-<br/>
+### Execution and Risk
+- `Execution Plan`: order-book walk simulation (expected price, slippage, fillability).
+- Correct partial-fill accounting (`total_isk` reflects fillable quantity when full fill is impossible).
+- Scam/risk signals for trade quality filtering.
 
-[![GitHub stars](https://img.shields.io/github/stars/ilyaux/Eve-flipper?style=for-the-badge&logo=github&color=yellow)](https://github.com/ilyaux/Eve-flipper/stargazers)
-[![GitHub release](https://img.shields.io/github/v/release/ilyaux/Eve-flipper?style=for-the-badge&logo=github&color=blue)](https://github.com/ilyaux/Eve-flipper/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ilyaux/Eve-flipper/total?style=for-the-badge&logo=github&color=brightgreen)](https://github.com/ilyaux/Eve-flipper/releases)
-[![Last Commit](https://img.shields.io/github/last-commit/ilyaux/Eve-flipper?style=for-the-badge&logo=github)](https://github.com/ilyaux/Eve-flipper/commits/master)
+### PLEX and Industry
+- `PLEX Dashboard`: arbitrage paths, SP-farm math, depth, indicators, cross-hub comparison.
+- Hardened PLEX backend flow: in-flight request deduplication and stale-cache fallback during ESI instability.
+- `Industry Chain Optimizer`: buy-vs-build decomposition with material tree and system-aware costs.
 
-<br/>
+### Character and Portfolio
+- EVE SSO integration for wallet/orders/transactions/structures.
+- Portfolio analytics and optimization modules.
+- Undercut monitoring and station-level context.
 
-**Station Trading** · **Hauling Routes** · **Contract Flipping** · **Industry Analysis**
+## Architecture
 
-[📥 Download](https://github.com/ilyaux/Eve-flipper/releases) · 
-[📚 Documentation](https://github.com/ilyaux/Eve-flipper/wiki) · 
-[💬 Discord](https://discord.gg/Z9pXSGcJZE) · 
-[🐛 Report Bug](https://github.com/ilyaux/Eve-flipper/issues)
+- Backend: `Go` (`net/http`), SQLite persistence, ESI client with caching/rate-limiting.
+- Frontend: `React + TypeScript + Vite`.
+- Distribution model: single backend binary with embedded frontend assets.
+- Default runtime: local bind (`127.0.0.1:13370`).
 
-<br/>
+## Quick Start
 
-<img src="assets/screenshot-station.png" alt="EVE Flipper Screenshot" width="800"/>
+### Option 1: Release binaries
 
-</div>
+Download the latest build from:
+- https://github.com/ilyaux/Eve-flipper/releases
 
----
+Run the binary and open:
+- `http://127.0.0.1:13370`
 
-## ✨ Features
+### Option 2: Build from source
 
-<table>
-<tr>
-<td width="50%">
-
-### 📊 Trading Tools
-- **Station Trading Pro** — Same-station flipping with EVE Guru metrics
-- **Radius Scan** — Find deals within jump range
-- **Region Arbitrage** — Cross-region price differences
-- **Contract Scanner** — Evaluate contracts vs market
-- **Route Builder** — Optimal multi-hop trade routes
-
-</td>
-<td width="50%">
-
-### 🏭 Industry Analysis
-- **Production Chain Optimizer** — Buy vs Build calculator
-- **Material Tree** — Visualize complete production chains
-- **Shopping Lists** — Auto-generated buy lists
-- **Cost Calculations** — ME/TE, system index, facility bonuses
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-### 🛡️ Risk Management
-- **Scam Detection** — VWAP-based risk scoring
-- **Bait Order Detection** — Identifies manipulation
-- **Volume Analysis** — Liquidity warnings
-- **Historical Data** — Price trend analysis
-
-</td>
-<td width="50%">
-
-### 🎮 Quality of Life
-- **EVE SSO Login** — View your orders & wallet
-- **Scan History** — Save & restore results
-- **Keyboard Shortcuts** — Power user workflow
-- **Dark Theme** — Easy on the eyes
-
-</td>
-</tr>
-</table>
-
----
-
-## 🖼️ Screenshots
-
-<div align="center">
-<table>
-<tr>
-<td align="center"><b>Station Trading</b></td>
-<td align="center"><b>Route Builder</b></td>
-<td align="center"><b>Industry Optimizer</b></td>
-</tr>
-<tr>
-<td><a href="assets/screenshot-station.png"><img src="assets/screenshot-station.png" width="280"/></a></td>
-<td><a href="assets/screenshot-routes.png"><img src="assets/screenshot-routes.png" width="280"/></a></td>
-<td><a href="assets/screenshot-radius.png"><img src="assets/screenshot-radius.png" width="280"/></a></td>
-</tr>
-</table>
-<sub>Click to enlarge</sub>
-</div>
-
----
-
-## 🚀 Quick Start
-
-### Download
-
-Grab the latest release for your platform:
-
-| Platform | Download |
-|:--------:|:--------:|
-| <img src="https://img.icons8.com/color/48/windows-10.png" width="24"/> **Windows** | [`eve-flipper-windows-amd64.exe`](https://github.com/ilyaux/Eve-flipper/releases/latest) |
-| <img src="https://img.icons8.com/color/48/linux.png" width="24"/> **Linux** | [`eve-flipper-linux-amd64`](https://github.com/ilyaux/Eve-flipper/releases/latest) |
-| <img src="https://img.icons8.com/color/48/mac-os.png" width="24"/> **macOS (Apple Silicon)** | [`eve-flipper-darwin-arm64`](https://github.com/ilyaux/Eve-flipper/releases/latest) |
-| <img src="https://img.icons8.com/color/48/mac-os.png" width="24"/> **macOS (Intel)** | [`eve-flipper-darwin-amd64`](https://github.com/ilyaux/Eve-flipper/releases/latest) |
-
-### Run
+Prerequisites:
+- Go `1.25+`
+- Node.js `20+`
+- npm
 
 ```bash
-# Windows
-eve-flipper-windows-amd64.exe
-
-# Linux
-chmod +x eve-flipper-linux-amd64
-./eve-flipper-linux-amd64
-
-# macOS (Apple Silicon)
-chmod +x eve-flipper-darwin-arm64
-./eve-flipper-darwin-arm64
-
-# macOS (Intel)
-chmod +x eve-flipper-darwin-amd64
-./eve-flipper-darwin-amd64
+git clone https://github.com/ilyaux/Eve-flipper.git
+cd Eve-flipper
+npm -C frontend install
+npm -C frontend run build
+go build -o build/eve-flipper .
+./build/eve-flipper
 ```
 
-Open **http://127.0.0.1:13370** in your browser 🎉
+Windows PowerShell helpers:
 
-> **Note:** First launch downloads SDE data (~1-2 minutes)
+```powershell
+.\make.ps1 build
+.\make.ps1 run
+```
 
-> **Security note:** The server listens on `127.0.0.1` by default.  
-> EVE SSO credentials (client ID/secret) are **not stored in the repo** and are injected into official releases via GitHub Actions secrets.
-
-### Host and port
-
-You can change the bind address and port:
+Unix Make targets:
 
 ```bash
-# Listen on all interfaces (LAN, VM, port forward)
-./eve-flipper-linux-amd64 --host 0.0.0.0 --port 13370
+make build
+make run
+```
+
+## Runtime Flags
+
+```bash
+./eve-flipper --host 127.0.0.1 --port 13370
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--host` | `127.0.0.1` | Bind address. Use `0.0.0.0` to allow access from other devices (e.g. Proxmox VM, same network). |
-| `--port` | `13370` | HTTP server port. |
+| `--host` | `127.0.0.1` | Bind address (`0.0.0.0` for LAN/remote access) |
+| `--port` | `13370` | HTTP port |
 
----
+## Local SSO Setup (for source builds)
 
-## 📖 Documentation
+SSO is disabled unless credentials are provided.
 
-| Guide | Description |
-|-------|-------------|
-| 🏁 [Getting Started](https://github.com/ilyaux/Eve-flipper/wiki/Getting-Started) | Installation & first scan |
-| 💹 [Station Trading](https://github.com/ilyaux/Eve-flipper/wiki/Station-Trading) | Master same-station trading |
-| 🏭 [Industry Optimizer](https://github.com/ilyaux/Eve-flipper/wiki/Industry-Chain-Optimizer) | Buy vs Build analysis |
-| 📊 [Metrics Reference](https://github.com/ilyaux/Eve-flipper/wiki/Metrics-Reference) | CTS, VWAP, SDS explained |
-| 🔐 [EVE SSO Login](https://github.com/ilyaux/Eve-flipper/wiki/EVE-SSO-Login) | Connect your character |
-| 🛠️ [Building from Source](https://github.com/ilyaux/Eve-flipper/wiki/Building-from-Source) | Compile yourself |
-
-### Local SSO configuration (developers / source builds)
-
-When building from source, EVE SSO is **disabled by default**. To enable it:
-
-1. Create an EVE developer application (`Authentication Only`) at `https://developers.eveonline.com/`.
-2. Set the callback URL to: `http://localhost:13370/api/auth/callback`.
-3. Copy your **Client ID** and **Client Secret**.
-4. Create a local `.env` file in the repo root (or next to the binary):
+Create `.env` in repo root:
 
 ```env
 ESI_CLIENT_ID=your-client-id
@@ -182,113 +99,61 @@ ESI_CLIENT_SECRET=your-client-secret
 ESI_CALLBACK_URL=http://localhost:13370/api/auth/callback
 ```
 
-> Do **not** commit this file. `.env` is already ignored by `.gitignore`.  
-> Official release binaries use credentials injected from GitHub Secrets; you only need `.env` for local dev/self-builds.
+Do not commit `.env`.
 
----
+## Development Workflow
 
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|:--------:|--------|
-| `Ctrl + S` | Start/Stop scan |
-| `Alt + 1-6` | Switch tabs |
-| `Ctrl + W` | Open Watchlist |
-| `Ctrl + H` | Open History |
-| `Escape` | Close modals |
-
----
-
-## 🛠️ Tech Stack
-
-<div align="center">
-
-| Backend | Frontend | Data |
-|:-------:|:--------:|:----:|
-| ![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) | ![React](https://img.shields.io/badge/React-61DAFB?style=flat-square&logo=react&logoColor=black) | ![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white) |
-| ![Fiber](https://img.shields.io/badge/net/http-00ADD8?style=flat-square&logo=go&logoColor=white) | ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) | ![ESI](https://img.shields.io/badge/EVE_ESI-1D1D1D?style=flat-square&logo=eve-online&logoColor=white) |
-| Single binary | ![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white) | Real-time data |
-
-</div>
-
----
-
-## 💬 Community
-
-Join the **EVE Flipper** Discord for questions, tips, and feedback:
-
-[![Discord](https://img.shields.io/badge/Discord-EVE%20Flipper-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/EVHjew5N)
-
-**[→ Join server](https://discord.gg/Z9pXSGcJZE)**
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Backend:
 
 ```bash
-git clone https://github.com/ilyaux/Eve-flipper.git
-cd Eve-flipper
-make build  # or .\make.ps1 build on Windows
+go run .
 ```
 
----
+Frontend dev server:
 
-## 👥 Contributors
+```bash
+npm -C frontend install
+npm -C frontend run dev
+```
 
-<div align="center">
+Tests:
 
-<a href="https://github.com/ilyaux/Eve-flipper/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ilyaux/Eve-flipper&max=100" />
-</a>
+```bash
+go test ./...
+```
 
-<br/><br/>
+Production frontend build check:
 
-[![Contributors](https://img.shields.io/github/contributors/ilyaux/Eve-flipper?style=for-the-badge&color=blue)](https://github.com/ilyaux/Eve-flipper/graphs/contributors)
-[![Forks](https://img.shields.io/github/forks/ilyaux/Eve-flipper?style=for-the-badge&color=lightgrey)](https://github.com/ilyaux/Eve-flipper/network/members)
-[![Issues](https://img.shields.io/github/issues/ilyaux/Eve-flipper?style=for-the-badge&color=yellow)](https://github.com/ilyaux/Eve-flipper/issues)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](https://github.com/ilyaux/Eve-flipper/pulls)
+```bash
+npm -C frontend run build
+```
 
-</div>
+## Documentation
 
----
+- Project wiki: https://github.com/ilyaux/Eve-flipper/wiki
+- Getting Started: https://github.com/ilyaux/Eve-flipper/wiki/Getting-Started
+- API Reference: https://github.com/ilyaux/Eve-flipper/wiki/API-Reference
+- Station Trading: https://github.com/ilyaux/Eve-flipper/wiki/Station-Trading
+- Contract Scanner: https://github.com/ilyaux/Eve-flipper/wiki/Contract-Scanner
+- Execution Plan: https://github.com/ilyaux/Eve-flipper/wiki/Execution-Plan
+- PLEX Dashboard: https://github.com/ilyaux/Eve-flipper/wiki/PLEX-Dashboard
 
-## 📄 License
+## Security Notes
 
-This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+- By default, the server listens only on localhost.
+- ESI credentials are never required for non-SSO features.
+- If exposed beyond localhost (`--host 0.0.0.0`), use your own network hardening (firewall/reverse proxy/TLS).
 
----
+## Contributing
 
-## ⚠️ Disclaimer
+See:
+- `CONTRIBUTING.md`
 
-EVE Flipper is a third-party tool and is **not affiliated with or endorsed by CCP Games**. 
-EVE Online and all related trademarks are property of CCP hf.
+## License
 
----
+MIT License. See `LICENSE`.
 
-<div align="center">
+## Disclaimer
 
-**Made with ❤️ for New Eden traders**
-
-⭐ Star this repo if you find it useful!
-
-<br/>
-
-<sub>
-<a href="https://github.com/ilyaux/Eve-flipper/stargazers">Stars</a> · 
-<a href="https://github.com/ilyaux/Eve-flipper/network/members">Forks</a> · 
-<a href="https://github.com/ilyaux/Eve-flipper/issues">Issues</a> · 
-<a href="https://github.com/ilyaux/Eve-flipper/releases">Releases</a> · 
-<a href="https://discord.gg/EVHjew5N">Discord</a>
-</sub>
-
-</div>
-
-<!-- Keywords for search -->
-<details>
-<summary>Keywords</summary>
-
-EVE Online market tool, EVE station trading, EVE hauling calculator, EVE arbitrage scanner, EVE market flipping, EVE ISK making tool, EVE trade route finder, EVE contract scanner, EVE profit calculator, EVE market analysis, Jita market scanner, EVE industry calculator, EVE production chain analyzer, EVE manufacturing cost calculator, EVE blueprint calculator, EVE buy vs build, New Eden trading, CCP ESI API tool
-
-</details>
+EVE Flipper is an independent third-party project and is not affiliated with CCP Games.  
+EVE Online and related trademarks are property of CCP hf.
