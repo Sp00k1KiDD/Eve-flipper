@@ -36,6 +36,9 @@ export interface FlipResult {
   ExpectedBuyPrice?: number;
   ExpectedSellPrice?: number;
   ExpectedProfit?: number;
+  RealProfit?: number;
+  FilledQty?: number;
+  CanFill?: boolean;
   SlippageBuyPct?: number;
   SlippageSellPct?: number;
 }
@@ -47,6 +50,12 @@ export interface ContractResult {
   MarketValue: number;
   Profit: number;
   MarginPercent: number;
+  ExpectedProfit?: number;
+  ExpectedMarginPercent?: number;
+  SellConfidence?: number;
+  EstLiquidationDays?: number;
+  ConservativeValue?: number;
+  CarryCost?: number;
   Volume: number;
   StationName: string;
   SystemName?: string;
@@ -123,6 +132,7 @@ export interface StationTrade {
   BuyVolume: number;
   SellVolume: number;
   TotalProfit: number;
+  DailyProfit?: number;
   ROI: number;
   StationName: string;
   StationID: number;
@@ -149,6 +159,9 @@ export interface StationTrade {
   ExpectedBuyPrice?: number;
   ExpectedSellPrice?: number;
   ExpectedProfit?: number;
+  RealProfit?: number;
+  FilledQty?: number;
+  CanFill?: boolean;
   SlippageBuyPct?: number;
   SlippageSellPct?: number;
 }
@@ -233,6 +246,9 @@ export interface ScanParams {
   max_contract_margin?: number;
   min_priced_ratio?: number;
   require_history?: boolean;
+  contract_instant_liquidation?: boolean;
+  contract_hold_days?: number;
+  contract_target_confidence?: number;
   // Player structures
   include_structures?: boolean;
 }

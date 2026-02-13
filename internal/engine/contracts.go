@@ -24,6 +24,16 @@ const (
 	MaxVWAPDeviation = 30.0
 	// MinDailyVolumeForContract filters out items with no recent trading activity.
 	MinDailyVolumeForContract = 1
+	// DefaultContractHoldDays is the default holding horizon for non-instant mode.
+	DefaultContractHoldDays = 7
+	// DefaultContractTargetConfidence is the default minimum full-liquidation probability (%).
+	DefaultContractTargetConfidence = 80.0
+	// ContractFillParticipation is a conservative share of daily market volume we expect to capture.
+	ContractFillParticipation = 0.35
+	// ContractConservativePriceHaircut is an additional conservative markdown on expected proceeds.
+	ContractConservativePriceHaircut = 0.03
+	// ContractDailyCarryRate models opportunity/carry cost of locked capital per day.
+	ContractDailyCarryRate = 0.001
 )
 
 // getContractFilters returns effective filter values, using defaults if params are 0.
@@ -41,6 +51,95 @@ func getContractFilters(params ScanParams) (minPrice, maxMargin, minPricedRatio 
 		minPricedRatio = DefaultMinPricedRatio
 	}
 	return
+}
+
+func contractSellValueMultiplier(params ScanParams) float64 {
+	// Instant liquidation sells immediately into existing buy orders:
+	// no broker fee is paid, only sales tax.
+	if params.ContractInstantLiquidation {
+		m := 1.0 - params.SalesTaxPercent/100
+		if m < 0 {
+			return 0
+		}
+		return m
+	}
+	// Market-estimate mode assumes placing sell orders on market:
+	// sales tax + broker fee on sell side.
+	feePercent := params.SalesTaxPercent + params.BrokerFeePercent
+	m := 1.0 - feePercent/100
+	if m < 0 {
+		return 0
+	}
+	return m
+}
+
+func contractHoldDays(params ScanParams) int {
+	if params.ContractHoldDays <= 0 {
+		return DefaultContractHoldDays
+	}
+	if params.ContractHoldDays > 180 {
+		return 180
+	}
+	return params.ContractHoldDays
+}
+
+func contractTargetConfidence(params ScanParams) float64 {
+	if params.ContractTargetConfidence <= 0 {
+		return DefaultContractTargetConfidence
+	}
+	if params.ContractTargetConfidence > 100 {
+		return 100
+	}
+	return params.ContractTargetConfidence
+}
+
+func effectiveDailyVolume(pd *itemPriceData) float64 {
+	if pd == nil {
+		return 0
+	}
+	if pd.DailyVolume > 0 {
+		return pd.DailyVolume
+	}
+	// Fallback proxy when history is unavailable: treat current book depth
+	// as roughly two weeks of turnover.
+	if pd.TotalSellVol > 0 {
+		return float64(pd.TotalSellVol) / 14.0
+	}
+	return 0
+}
+
+func estimateFillDays(quantity int32, dailyVol float64) float64 {
+	if quantity <= 0 {
+		return 0
+	}
+	if dailyVol <= 0 {
+		return math.Inf(1)
+	}
+	executablePerDay := dailyVol * ContractFillParticipation
+	if executablePerDay <= 0 {
+		return math.Inf(1)
+	}
+	return float64(quantity) / executablePerDay
+}
+
+func fillProbabilityWithinDays(fillDays, horizonDays float64) float64 {
+	if horizonDays <= 0 {
+		return 0
+	}
+	if fillDays <= 0 {
+		return 1
+	}
+	if math.IsInf(fillDays, 1) {
+		return 0
+	}
+	p := 1 - math.Exp(-horizonDays/fillDays)
+	if p < 0 {
+		return 0
+	}
+	if p > 1 {
+		return 1
+	}
+	return p
 }
 
 // itemPriceData holds market data for an item type.
@@ -66,12 +165,25 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		buySystems = s.SDE.Universe.SystemsWithinRadius(params.CurrentSystemID, params.BuyRadius)
 	}
 	buyRegions := s.SDE.Universe.RegionsInSet(buySystems)
+	contractInstant := params.ContractInstantLiquidation
+
+	var sellSystems map[int32]int
+	var sellRegions map[int32]bool
+	if contractInstant {
+		if params.MinRouteSecurity > 0 {
+			sellSystems = s.SDE.Universe.SystemsWithinRadiusMinSecurity(params.CurrentSystemID, params.SellRadius, params.MinRouteSecurity)
+		} else {
+			sellSystems = s.SDE.Universe.SystemsWithinRadius(params.CurrentSystemID, params.SellRadius)
+		}
+		sellRegions = s.SDE.Universe.RegionsInSet(sellSystems)
+	}
 
 	log.Printf("[DEBUG] ScanContracts: buySystems=%d, buyRegions=%d, minPrice=%.0f, maxMargin=%.1f",
 		len(buySystems), len(buyRegions), minContractPrice, maxContractMargin)
 
 	// Fetch market orders and contracts in parallel
 	var sellOrders []esi.MarketOrder
+	var buyOrdersForLiquidation []esi.MarketOrder
 	var allContracts []esi.PublicContract
 	var contractsMu sync.Mutex
 	var wg sync.WaitGroup
@@ -83,6 +195,13 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		defer wg.Done()
 		sellOrders = s.fetchOrders(buyRegions, "sell", buySystems)
 	}()
+	if contractInstant {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buyOrdersForLiquidation = s.fetchOrders(sellRegions, "buy", sellSystems)
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		// Fetch contracts from ALL regions in PARALLEL (with caching)
@@ -106,6 +225,37 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 	wg.Wait()
 
 	log.Printf("[DEBUG] ScanContracts: %d sell orders, %d contracts total", len(sellOrders), len(allContracts))
+	if contractInstant {
+		log.Printf("[DEBUG] ScanContracts: instant liquidation enabled, %d buy orders in sell radius", len(buyOrdersForLiquidation))
+	}
+
+	// Build location -> system map from market orders (covers player structures
+	// that are not present in SDE.Stations).
+	marketLocationSystems := make(map[int64]int32, len(sellOrders))
+	for _, o := range sellOrders {
+		if o.LocationID == 0 || o.SystemID == 0 {
+			continue
+		}
+		if _, exists := marketLocationSystems[o.LocationID]; !exists {
+			marketLocationSystems[o.LocationID] = o.SystemID
+		}
+	}
+	for _, o := range buyOrdersForLiquidation {
+		if o.LocationID == 0 || o.SystemID == 0 {
+			continue
+		}
+		if _, exists := marketLocationSystems[o.LocationID]; !exists {
+			marketLocationSystems[o.LocationID] = o.SystemID
+		}
+	}
+
+	// Instant liquidation pricing input: buy-book depth by type (sell radius).
+	buyOrdersByType := make(map[int32][]esi.MarketOrder)
+	if contractInstant {
+		for _, o := range buyOrdersForLiquidation {
+			buyOrdersByType[o.TypeID] = append(buyOrdersByType[o.TypeID], o)
+		}
+	}
 
 	// Build price data map: typeID -> itemPriceData
 	// Track min price, total volume, and order count per type
@@ -147,12 +297,14 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		if c.Price < minContractPrice {
 			continue // skip scam/bait contracts with very low prices
 		}
-		// Pre-filter: skip contracts in unreachable locations (not in buySystems)
-		sysID := s.locationToSystem(c.StartLocationID)
-		if sysID != 0 {
-			if _, ok := buySystems[sysID]; !ok {
-				continue // contract station is outside buy radius
-			}
+		// Pre-filter: skip contracts in unknown or unreachable locations.
+		// If we can't map location -> system, we can't verify accessibility.
+		sysID := s.locationToSystem(c.StartLocationID, marketLocationSystems)
+		if sysID == 0 {
+			continue
+		}
+		if _, ok := buySystems[sysID]; !ok {
+			continue // contract station is outside buy radius
 		}
 		candidates = append(candidates, c)
 	}
@@ -176,34 +328,34 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 
 	log.Printf("[DEBUG] ScanContracts: fetched items for %d contracts", len(contractItems))
 
-	// Collect unique type IDs that need history lookup
-	typeIDsNeedHistory := make(map[int32]bool)
-	for _, items := range contractItems {
-		for _, item := range items {
-			if item.IsIncluded && !item.IsBlueprintCopy {
-				if _, ok := priceData[item.TypeID]; ok {
-					typeIDsNeedHistory[item.TypeID] = true
+	// Collect unique type IDs that need history lookup (estimate mode only).
+	if !contractInstant {
+		typeIDsNeedHistory := make(map[int32]bool)
+		for _, items := range contractItems {
+			for _, item := range items {
+				if item.IsIncluded && !item.IsBlueprintCopy {
+					if _, ok := priceData[item.TypeID]; ok {
+						typeIDsNeedHistory[item.TypeID] = true
+					}
 				}
 			}
 		}
+
+		// Fetch market history for pricing validation — prefer trade hub region for VWAP
+		primaryRegion := bestHubRegion(buyRegions)
+
+		if s.History != nil && len(typeIDsNeedHistory) > 0 {
+			progress(fmt.Sprintf("Fetching market history for %d item types...", len(typeIDsNeedHistory)))
+			s.fetchContractItemsHistory(typeIDsNeedHistory, priceData, primaryRegion)
+		}
+
+		log.Printf("[DEBUG] ScanContracts: enriched %d types with history", len(typeIDsNeedHistory))
 	}
 
-	// Fetch market history for pricing validation — prefer trade hub region for VWAP
-	primaryRegion := bestHubRegion(buyRegions)
-
-	if s.History != nil && len(typeIDsNeedHistory) > 0 {
-		progress(fmt.Sprintf("Fetching market history for %d item types...", len(typeIDsNeedHistory)))
-		s.fetchContractItemsHistory(typeIDsNeedHistory, priceData, primaryRegion)
-	}
-
-	log.Printf("[DEBUG] ScanContracts: enriched %d types with history", len(typeIDsNeedHistory))
-
-	// Calculate profit for each contract (sales tax + broker fee on sell side)
-	feePercent := params.SalesTaxPercent + params.BrokerFeePercent
-	taxMult := 1.0 - feePercent/100
-	if taxMult < 0 {
-		taxMult = 0
-	}
+	// Calculate profit for each contract.
+	sellValueMult := contractSellValueMultiplier(params)
+	holdDays := contractHoldDays(params)
+	targetConfidence := contractTargetConfidence(params)
 
 	var results []ContractResult
 
@@ -220,6 +372,9 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		var topItems []string      // for generating title
 		var lowVolumeItems int     // items with suspicious low trading volume
 		var highDeviationItems int // items where sell price deviates significantly from VWAP
+		fullLiquidationProb := 1.0
+		maxFillDays := 0.0
+		expectedGrossByFill := 0.0
 
 		hasBPO := false
 		for _, item := range items {
@@ -240,9 +395,33 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 			}
 			totalTypes++
 
-			pd, ok := priceData[item.TypeID]
-			if !ok || pd.MinSellPrice == 0 || pd.MinSellPrice == math.MaxFloat64 {
-				continue // can't price this item
+			if contractInstant {
+				book := buyOrdersByType[item.TypeID]
+				if len(book) == 0 {
+					continue
+				}
+				plan := ComputeExecutionPlan(book, item.Quantity, false)
+				if !plan.CanFill || plan.ExpectedPrice <= 0 {
+					continue
+				}
+
+				pricedCount++
+				marketValue += plan.ExpectedPrice * float64(item.Quantity)
+				itemCount += item.Quantity
+
+				if typeName, ok := s.SDE.Types[item.TypeID]; ok {
+					if item.Quantity > 1 {
+						topItems = append(topItems, fmt.Sprintf("%dx %s", item.Quantity, typeName.Name))
+					} else {
+						topItems = append(topItems, typeName.Name)
+					}
+				}
+				continue
+			}
+
+				pd, ok := priceData[item.TypeID]
+				if !ok || pd.MinSellPrice == 0 || pd.MinSellPrice == math.MaxFloat64 {
+					continue // can't price this item
 			}
 
 			// Determine the best price to use: prefer VWAP if available and reliable
@@ -272,12 +451,25 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 				lowVolumeItems++
 			}
 
-			pricedCount++
-			marketValue += usePrice * float64(item.Quantity)
-			itemCount += item.Quantity
+				pricedCount++
+				marketValue += usePrice * float64(item.Quantity)
+				itemCount += item.Quantity
 
-			// Build item name for title generation
-			if typeName, ok := s.SDE.Types[item.TypeID]; ok {
+				dailyVol := effectiveDailyVolume(pd)
+				fillDays := estimateFillDays(item.Quantity, dailyVol)
+				itemFillProb := fillProbabilityWithinDays(fillDays, float64(holdDays))
+				fullLiquidationProb *= itemFillProb
+				if math.IsInf(fillDays, 1) {
+					if maxFillDays < float64(holdDays)*10 {
+						maxFillDays = float64(holdDays) * 10
+					}
+				} else if fillDays > maxFillDays {
+					maxFillDays = fillDays
+				}
+				expectedGrossByFill += usePrice * float64(item.Quantity) * itemFillProb
+
+				// Build item name for title generation
+				if typeName, ok := s.SDE.Types[item.TypeID]; ok {
 				if item.Quantity > 1 {
 					topItems = append(topItems, fmt.Sprintf("%dx %s", item.Quantity, typeName.Name))
 				} else {
@@ -298,6 +490,11 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		if float64(pricedCount)/float64(totalTypes) < minPricedRatio {
 			continue
 		}
+		// In instant liquidation mode, require full immediate liquidation of all
+		// included tradable items in the contract.
+		if contractInstant && pricedCount < totalTypes {
+			continue
+		}
 
 		// Skip if too many items have low volume (unreliable pricing)
 		if pricedCount > 0 && float64(lowVolumeItems)/float64(pricedCount) > 0.5 {
@@ -314,18 +511,42 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		}
 
 		// Calculate profit
-		effectiveValue := marketValue * taxMult
+		effectiveValue := marketValue * sellValueMult
 		profit := effectiveValue - contract.Price
 		if profit <= 0 {
 			continue
 		}
 
 		margin := profit / contract.Price * 100
-		if margin < params.MinMargin {
-			continue
-		}
 		if margin > maxContractMargin {
 			continue // margin too high — likely a scam or pricing error
+		}
+
+		expectedProfit := profit
+		expectedMargin := margin
+		sellConfidencePct := 100.0
+		estLiqDays := 0.0
+		conservativeValue := effectiveValue
+		carryCost := 0.0
+
+		if !contractInstant {
+			sellConfidencePct = fullLiquidationProb * 100
+			if sellConfidencePct < targetConfidence {
+				continue
+			}
+			estLiqDays = maxFillDays
+			conservativeGross := expectedGrossByFill * (1.0 - ContractConservativePriceHaircut)
+			conservativeValue = conservativeGross * sellValueMult
+			carryCost = contract.Price * ContractDailyCarryRate * float64(holdDays)
+			expectedProfit = conservativeValue - contract.Price - carryCost
+			if expectedProfit <= 0 {
+				continue
+			}
+			expectedMargin = safeDiv(expectedProfit, contract.Price) * 100
+		}
+
+		if expectedMargin < params.MinMargin {
+			continue
 		}
 
 		// Generate title from items if contract title is empty
@@ -343,13 +564,20 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 		stationName := s.ESI.StationName(contract.StartLocationID)
 
 		// Resolve system and region for the contract location
-		sysID := s.locationToSystem(contract.StartLocationID)
+		sysID := s.locationToSystem(contract.StartLocationID, marketLocationSystems)
 		sysName := ""
 		regionName := ""
 		if sysID != 0 {
 			sysName = s.systemName(sysID)
 			if sys, ok := s.SDE.Systems[sysID]; ok {
 				regionName = s.regionName(sys.RegionID)
+			}
+		}
+		if strings.HasPrefix(stationName, "Location ") || strings.HasPrefix(stationName, "Structure ") {
+			if eveName := s.ESI.EVERefStructureName(contract.StartLocationID); eveName != "" {
+				stationName = eveName
+			} else if sysName != "" {
+				stationName = fmt.Sprintf("Structure @ %s", sysName)
 			}
 		}
 
@@ -375,6 +603,12 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 			MarketValue:   marketValue,
 			Profit:        sanitizeFloat(profit),
 			MarginPercent: sanitizeFloat(margin),
+			ExpectedProfit:        sanitizeFloat(expectedProfit),
+			ExpectedMarginPercent: sanitizeFloat(expectedMargin),
+			SellConfidence:        sanitizeFloat(sellConfidencePct),
+			EstLiquidationDays:    sanitizeFloat(estLiqDays),
+			ConservativeValue:     sanitizeFloat(conservativeValue),
+			CarryCost:             sanitizeFloat(carryCost),
 			Volume:        contract.Volume,
 			StationName:   stationName,
 			SystemName:    sysName,
@@ -389,7 +623,15 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 
 	// Sort by profit descending, keep top 100
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].Profit > results[j].Profit
+		left := results[i].ExpectedProfit
+		if left == 0 {
+			left = results[i].Profit
+		}
+		right := results[j].ExpectedProfit
+		if right == 0 {
+			right = results[j].Profit
+		}
+		return left > right
 	})
 	// Cap to prevent server overload on contract results
 	if len(results) > MaxUnlimitedResults {
@@ -401,9 +643,14 @@ func (s *Scanner) ScanContracts(params ScanParams, progress func(string)) ([]Con
 }
 
 // locationToSystem maps a station/structure ID to its solar system ID.
-func (s *Scanner) locationToSystem(locationID int64) int32 {
+func (s *Scanner) locationToSystem(locationID int64, marketLocationSystems map[int64]int32) int32 {
 	if station, ok := s.SDE.Stations[locationID]; ok {
 		return station.SystemID
+	}
+	if marketLocationSystems != nil {
+		if sysID, ok := marketLocationSystems[locationID]; ok {
+			return sysID
+		}
 	}
 	return 0
 }

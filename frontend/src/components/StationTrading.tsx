@@ -117,7 +117,7 @@ const columnDefs: {
   { key: "DOS", labelKey: "colDOS", width: "min-w-[60px]", numeric: true },
   { key: "SDS", labelKey: "colSDS", width: "min-w-[50px]", numeric: true },
   {
-    key: "TotalProfit",
+    key: "DailyProfit",
     labelKey: "colDailyProfit",
     width: "min-w-[100px]",
     numeric: true,
@@ -126,6 +126,17 @@ const columnDefs: {
 
 // Sentinel value for "All stations"
 const ALL_STATIONS_ID = 0;
+
+function stationDailyProfit(row: StationTrade): number {
+  return row.DailyProfit ?? row.RealProfit ?? row.TotalProfit ?? 0;
+}
+
+function normalizeStationResults(rows: StationTrade[]): StationTrade[] {
+  return rows.map((r) => ({
+    ...r,
+    DailyProfit: stationDailyProfit(r),
+  }));
+}
 
 export function StationTrading({
   params,
@@ -192,7 +203,7 @@ export function StationTrading({
   // Accept externally loaded results (from history)
   useEffect(() => {
     if (loadedResults && loadedResults.length > 0) {
-      setResults(loadedResults);
+      setResults(normalizeStationResults(loadedResults));
     }
   }, [loadedResults]);
 
@@ -417,7 +428,7 @@ export function StationTrading({
       }
 
       const res = await scanStation(scanParams, setProgress, controller.signal);
-      setResults(res);
+      setResults(normalizeStationResults(res));
     } catch (e: unknown) {
       if (e instanceof Error && e.name !== "AbortError") {
         setProgress(t("errorPrefix") + e.message);
@@ -475,7 +486,7 @@ export function StationTrading({
 
   const summary = useMemo(() => {
     if (sorted.length === 0) return null;
-    const totalProfit = sorted.reduce((sum, r) => sum + r.TotalProfit, 0);
+    const totalProfit = sorted.reduce((sum, r) => sum + stationDailyProfit(r), 0);
     const avgMargin =
       sorted.reduce((sum, r) => sum + r.MarginPercent, 0) / sorted.length;
     const avgCTS = sorted.reduce((sum, r) => sum + r.CTS, 0) / sorted.length;
@@ -492,11 +503,15 @@ export function StationTrading({
       col.key === "SellPrice" ||
       col.key === "Spread" ||
       col.key === "TotalProfit" ||
+      col.key === "DailyProfit" ||
       col.key === "ProfitPerUnit" ||
       col.key === "CapitalRequired" ||
       col.key === "VWAP"
     ) {
-      const n = val as number | undefined;
+      const n =
+        col.key === "DailyProfit"
+          ? stationDailyProfit(row)
+          : (val as number | undefined);
       return n != null && Number.isFinite(n) ? formatISK(n) : "\u2014";
     }
     if (

@@ -26,7 +26,8 @@ type StationTrade struct {
 	BuyVolume      int32   `json:"BuyVolume"`  // total volume of buy orders
 	SellVolume     int32   `json:"SellVolume"` // total volume of sell orders
 	TotalProfit    float64 `json:"TotalProfit"`
-	ROI            float64 `json:"ROI"` // profit / investment * 100
+	DailyProfit    float64 `json:"DailyProfit"` // estimated executable daily profit
+	ROI            float64 `json:"ROI"`         // profit / investment * 100
 	StationName    string  `json:"StationName"`
 	StationID      int64   `json:"StationID"`
 
@@ -61,7 +62,10 @@ type StationTrade struct {
 	// Execution-plan derived (expected fill prices from order book depth)
 	ExpectedBuyPrice  float64 `json:"ExpectedBuyPrice,omitempty"`
 	ExpectedSellPrice float64 `json:"ExpectedSellPrice,omitempty"`
-	ExpectedProfit    float64 `json:"ExpectedProfit,omitempty"`
+	ExpectedProfit    float64 `json:"ExpectedProfit,omitempty"` // expected net profit per unit
+	RealProfit        float64 `json:"RealProfit,omitempty"`     // expected net profit for target quantity
+	FilledQty         int32   `json:"FilledQty,omitempty"`      // executable profitable quantity
+	CanFill           bool    `json:"CanFill"`                  // whether target quantity is fully fillable
 	SlippageBuyPct    float64 `json:"SlippageBuyPct,omitempty"`
 	SlippageSellPct   float64 `json:"SlippageSellPct,omitempty"`
 }
@@ -95,6 +99,44 @@ type stationTypeKey struct {
 type orderGroup struct {
 	buyOrders  []esi.MarketOrder
 	sellOrders []esi.MarketOrder
+}
+
+func minInt32(a, b int32) int32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// estimateSellUnitsPerDay derives supply-side daily throughput from recent traded
+// volume and current book imbalance. This keeps BvS mathematically symmetric:
+// BvS = BuyUnitsPerDay / SellUnitsPerDay ~= BuyVolume / SellVolume.
+func estimateSellUnitsPerDay(dailyVolume float64, buyVolume, sellVolume int32) float64 {
+	if dailyVolume <= 0 || buyVolume <= 0 || sellVolume <= 0 {
+		return 0
+	}
+	return dailyVolume * float64(sellVolume) / float64(buyVolume)
+}
+
+// stationExecutionDesiredQty picks the quantity for execution simulation.
+// If daily share is known, we target that share capped by current depth.
+// Otherwise we fall back to a bounded probe size to avoid over-weighting huge books.
+func stationExecutionDesiredQty(dailyShare int64, buyVolume, sellVolume int32) int32 {
+	depthCap := minInt32(buyVolume, sellVolume)
+	if depthCap <= 0 {
+		return 0
+	}
+	if dailyShare > 0 {
+		if dailyShare > int64(depthCap) {
+			return depthCap
+		}
+		return int32(dailyShare)
+	}
+	const fallbackQty int32 = 1000
+	if depthCap < fallbackQty {
+		return depthCap
+	}
+	return fallbackQty
 }
 
 // StationTradeParams holds input parameters for station trading scan.
@@ -272,8 +314,15 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 		}
 
 		// Calculate order book metrics
+		// OBDS denominator should reflect actionable cycle capital, not full
+		// long-tail book not touched by this strategy.
+		tradableUnits := minInt32(totalBuyVol, totalSellVol)
+		obdsCapital := effectiveBuy * float64(tradableUnits)
+		if obdsCapital <= 0 {
+			obdsCapital = capitalRequired
+		}
 		ci := CalcCI(append(g.buyOrders, g.sellOrders...))
-		obds := CalcOBDS(g.buyOrders, g.sellOrders, capitalRequired)
+		obds := CalcOBDS(g.buyOrders, g.sellOrders, obdsCapital)
 
 		// NowROI = profit per unit / effective cost per unit (including broker fee) * 100
 		nowROI := 0.0
@@ -323,21 +372,14 @@ func (s *Scanner) ScanStationTrades(params StationTradeParams, progress func(str
 		results = results[:MaxUnlimitedResults]
 	}
 
-	// Expected fill prices from execution plan — per unit of volume.
-	// Use a small reference quantity (1000) to get expected avg prices and slippage,
-	// then store expected profit per unit = (expected sell price - expected buy price).
-	const refQtyForExpected = int32(1000)
+	// Initial expected fill prices from execution plan — per-unit signal.
+	// Final daily executable PnL is recalculated after history enrichment using
+	// stationExecutionDesiredQty(dailyShare, ...).
 	for i := range results {
 		r := &results[i]
 		key := stationTypeKey{r.StationID, r.TypeID}
 		if g, ok := orderGroups[key]; ok {
-			qty := refQtyForExpected
-			if r.SellVolume < qty {
-				qty = r.SellVolume
-			}
-			if r.BuyVolume < qty {
-				qty = r.BuyVolume
-			}
+			qty := stationExecutionDesiredQty(0, r.BuyVolume, r.SellVolume)
 			if qty > 0 {
 				planBuy := ComputeExecutionPlan(g.sellOrders, qty, true)
 				planSell := ComputeExecutionPlan(g.buyOrders, qty, false)
@@ -493,6 +535,17 @@ func (s *Scanner) enrichStationWithHistory(results []StationTrade, regionID int3
 	if avgPeriod <= 0 {
 		avgPeriod = 90
 	}
+	taxMult := 1.0 - params.SalesTaxPercent/100
+	if taxMult < 0 {
+		taxMult = 0
+	}
+	brokerFeeRate := params.BrokerFee / 100
+	if brokerFeeRate < 0 {
+		brokerFeeRate = 0
+	}
+	if brokerFeeRate > 1 {
+		brokerFeeRate = 1
+	}
 
 	type histResult struct {
 		idx     int
@@ -535,7 +588,37 @@ func (s *Scanner) enrichStationWithHistory(results []StationTrade, regionID int3
 		// Estimate daily share using harmonic distribution (top-of-book fills faster).
 		competitors := results[idx].BuyOrderCount + results[idx].SellOrderCount
 		dailyShare := harmonicDailyShare(r.stats.DailyVolume, competitors)
-		results[idx].TotalProfit = sanitizeFloat(results[idx].ProfitPerUnit * float64(dailyShare))
+		baselineDailyProfit := sanitizeFloat(results[idx].ProfitPerUnit * float64(dailyShare))
+		results[idx].DailyProfit = baselineDailyProfit
+		results[idx].TotalProfit = baselineDailyProfit
+
+		// Recompute execution-aware daily profit with an economically relevant qty.
+		// This fixes fixed-qty distortion from early pre-history enrichment.
+		execKey := stationTypeKey{results[idx].StationID, results[idx].TypeID}
+		if g, ok := orderGroups[execKey]; ok {
+			desiredQty := stationExecutionDesiredQty(dailyShare, results[idx].BuyVolume, results[idx].SellVolume)
+			if desiredQty > 0 {
+				safeQty, planBuy, planSell, expectedProfit := findSafeExecutionQuantity(
+					g.sellOrders, // asks we buy from
+					g.buyOrders,  // bids we sell into
+					desiredQty,
+					brokerFeeRate,
+					taxMult,
+				)
+				results[idx].CanFill = safeQty >= desiredQty && safeQty > 0
+				if safeQty > 0 {
+					results[idx].FilledQty = safeQty
+					results[idx].ExpectedBuyPrice = planBuy.ExpectedPrice
+					results[idx].ExpectedSellPrice = planSell.ExpectedPrice
+					results[idx].SlippageBuyPct = planBuy.SlippagePercent
+					results[idx].SlippageSellPct = planSell.SlippagePercent
+					results[idx].RealProfit = sanitizeFloat(expectedProfit)
+					results[idx].DailyProfit = sanitizeFloat(expectedProfit)
+					results[idx].TotalProfit = results[idx].DailyProfit // compatibility
+					results[idx].ExpectedProfit = sanitizeFloat(expectedProfit / float64(safeQty))
+				}
+			}
+		}
 
 		if len(r.entries) == 0 {
 			continue
@@ -560,24 +643,12 @@ func (s *Scanner) enrichStationWithHistory(results []StationTrade, regionID int3
 		dailyVol := avgDailyVolume(r.entries, 7)
 		results[idx].BuyUnitsPerDay = dailyVol
 
-		// SellUnitsPerDay: use the same daily volume as a base, but weight by
-		// sell order availability. If sell orders are scarce relative to buy orders,
-		// sell throughput is lower.
-		results[idx].SellUnitsPerDay = dailyVol
-		if results[idx].BuyVolume > 0 && results[idx].SellVolume > 0 {
-			// Adjust by supply ratio: if there are fewer sell orders, sell throughput is lower.
-			// ratio = sellVol / (buyVol + sellVol), range [0, 1].
-			// When ratio = 0.5 (balanced book), sellUnitsPerDay ≈ dailyVol.
-			// When ratio < 0.5 (sell-scarce), sellUnitsPerDay < dailyVol.
-			// When ratio > 0.5 (sell-heavy), sellUnitsPerDay still capped at dailyVol
-			// because actual throughput cannot exceed historical daily volume.
-			supplyRatio := float64(results[idx].SellVolume) / float64(results[idx].BuyVolume+results[idx].SellVolume)
-			adjusted := dailyVol * supplyRatio / 0.5 // normalize so ratio=0.5 → 1.0×
-			if adjusted > dailyVol {
-				adjusted = dailyVol // cap: can't sell more than market actually trades
-			}
-			results[idx].SellUnitsPerDay = adjusted
-		}
+		// SellUnitsPerDay is derived symmetrically from book imbalance.
+		results[idx].SellUnitsPerDay = estimateSellUnitsPerDay(
+			dailyVol,
+			results[idx].BuyVolume,
+			results[idx].SellVolume,
+		)
 
 		// B v S Ratio
 		if results[idx].SellUnitsPerDay > 0 {

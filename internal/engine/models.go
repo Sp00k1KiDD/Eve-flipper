@@ -39,6 +39,9 @@ type FlipResult struct {
 	ExpectedBuyPrice  float64 `json:"ExpectedBuyPrice,omitempty"`
 	ExpectedSellPrice float64 `json:"ExpectedSellPrice,omitempty"`
 	ExpectedProfit    float64 `json:"ExpectedProfit,omitempty"`
+	RealProfit        float64 `json:"RealProfit,omitempty"` // primary KPI: expected net ISK with depth/slippage
+	FilledQty         int32   `json:"FilledQty,omitempty"`  // executable profitable quantity from execution simulation
+	CanFill           bool    `json:"CanFill"`              // true when requested quantity is executable profitably
 	SlippageBuyPct    float64 `json:"SlippageBuyPct,omitempty"`
 	SlippageSellPct   float64 `json:"SlippageSellPct,omitempty"`
 }
@@ -51,6 +54,12 @@ type ContractResult struct {
 	MarketValue   float64 // sum of market prices for all items
 	Profit        float64
 	MarginPercent float64
+	ExpectedProfit        float64 // conservative horizon-aware expected profit
+	ExpectedMarginPercent float64 // expected profit / contract price * 100
+	SellConfidence        float64 // probability of full liquidation within hold horizon (0-100)
+	EstLiquidationDays    float64 // bottleneck fill-time estimate for full liquidation
+	ConservativeValue     float64 // conservative expected liquidation value after fees
+	CarryCost             float64 // opportunity/carry cost for hold horizon
 	Volume        float64 // contract volume in m³
 	StationName   string
 	SystemName    string `json:"SystemName,omitempty"`
@@ -118,8 +127,11 @@ type ScanParams struct {
 	TargetRegionID   int32   // 0 = search all by radius; >0 = search only in this specific region
 
 	// --- Contract-specific filters ---
-	MinContractPrice  float64 // Minimum contract price in ISK (0 = use default 10M)
-	MaxContractMargin float64 // Maximum margin % to filter scams (0 = use default 100%)
-	MinPricedRatio    float64 // Minimum fraction of items that must have market price (0 = use default 0.8)
-	RequireHistory    bool    // If true, skip items without market history
+	MinContractPrice           float64 // Minimum contract price in ISK (0 = use default 10M)
+	MaxContractMargin          float64 // Maximum margin % to filter scams (0 = use default 100%)
+	MinPricedRatio             float64 // Minimum fraction of items that must have market price (0 = use default 0.8)
+	RequireHistory             bool    // If true, skip items without market history
+	ContractInstantLiquidation bool    // If true, require immediate sell-side liquidation via buy-book depth (sell radius)
+	ContractHoldDays           int     // Non-instant mode: hold horizon in days (0 = default)
+	ContractTargetConfidence   float64 // Non-instant mode: minimum full-liquidation probability in % (0 = default)
 }

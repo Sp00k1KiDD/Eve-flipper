@@ -74,9 +74,27 @@ const baseColumnDefs: ColumnDef[] = [
     numeric: true,
   },
   {
+    key: "FilledQty",
+    labelKey: "colFilledQty",
+    width: "min-w-[80px]",
+    numeric: true,
+  },
+  {
+    key: "CanFill",
+    labelKey: "colCanFill",
+    width: "min-w-[70px]",
+    numeric: false,
+  },
+  {
     key: "BuyOrderRemain",
     labelKey: "colAcceptQty",
     width: "min-w-[80px]",
+    numeric: true,
+  },
+  {
+    key: "RealProfit",
+    labelKey: "colRealProfit",
+    width: "min-w-[120px]",
     numeric: true,
   },
   {
@@ -236,9 +254,13 @@ function passesFilter(row: FlipResult, col: ColumnDef, fval: string): boolean {
 
 function fmtCell(col: ColumnDef, row: FlipResult): string {
   const val = row[col.key];
-  if (col.key === "ExpectedProfit") {
+  if (col.key === "ExpectedProfit" || col.key === "RealProfit") {
     if (val == null || Number.isNaN(val)) return "\u2014";
     return formatISK(val as number);
+  }
+  if (col.key === "CanFill") {
+    if (val == null) return "\u2014";
+    return val ? "✓" : "✕";
   }
   if (
     col.key === "BuyPrice" ||
@@ -279,7 +301,7 @@ export function ScanResultsTable({
   const columnDefs = useMemo(() => buildColumnDefs(showRegions), [showRegions]);
 
   // ── State ──
-  const [sortKey, setSortKey] = useState<SortKey>("TotalProfit");
+  const [sortKey, setSortKey] = useState<SortKey>("RealProfit");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [showFilters, setShowFilters] = useState(false);
@@ -426,7 +448,10 @@ export function ScanResultsTable({
         ? sorted.filter((ir) => selectedIds.has(ir.id))
         : sorted;
     if (rows.length === 0) return null;
-    const totalProfit = rows.reduce((s, ir) => s + ir.row.TotalProfit, 0);
+    const totalProfit = rows.reduce(
+      (s, ir) => s + (ir.row.RealProfit ?? ir.row.ExpectedProfit ?? ir.row.TotalProfit),
+      0,
+    );
     const avgMargin =
       rows.reduce((s, ir) => s + ir.row.MarginPercent, 0) / rows.length;
     return { totalProfit, avgMargin, count: rows.length };
@@ -756,7 +781,7 @@ export function ScanResultsTable({
       {summary && results.length > 0 && (
         <div className="shrink-0 flex items-center gap-6 px-3 py-1.5 border-t border-eve-border text-xs">
           <span className="text-eve-dim">
-            {t("totalProfit")}:{" "}
+            {t("colRealProfit")}:{" "}
             <span className="text-eve-accent font-mono font-semibold">
               {formatISK(summary.totalProfit)}
             </span>

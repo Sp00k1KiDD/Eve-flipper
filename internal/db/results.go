@@ -94,9 +94,11 @@ func (d *DB) InsertContractResults(scanID int64, results []engine.ContractResult
 
 	stmt, err := tx.Prepare(`INSERT INTO contract_results (
 		scan_id, contract_id, title, price, market_value,
-		profit, margin_percent, volume, station_name,
+		profit, margin_percent, expected_profit, expected_margin_percent,
+		sell_confidence, est_liquidation_days, conservative_value, carry_cost,
+		volume, station_name,
 		item_count, jumps, profit_per_jump
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		tx.Rollback()
 		log.Printf("[DB] InsertContractResults prepare: %v", err)
@@ -107,7 +109,9 @@ func (d *DB) InsertContractResults(scanID int64, results []engine.ContractResult
 	for _, r := range results {
 		stmt.Exec(
 			scanID, r.ContractID, r.Title, r.Price, r.MarketValue,
-			r.Profit, r.MarginPercent, r.Volume, r.StationName,
+			r.Profit, r.MarginPercent, r.ExpectedProfit, r.ExpectedMarginPercent,
+			r.SellConfidence, r.EstLiquidationDays, r.ConservativeValue, r.CarryCost,
+			r.Volume, r.StationName,
 			r.ItemCount, r.Jumps, r.ProfitPerJump,
 		)
 	}
@@ -121,7 +125,9 @@ func (d *DB) InsertContractResults(scanID int64, results []engine.ContractResult
 func (d *DB) GetContractResults(scanID int64) []engine.ContractResult {
 	rows, err := d.sql.Query(`
 		SELECT contract_id, title, price, market_value,
-			profit, margin_percent, volume, station_name,
+			profit, margin_percent, expected_profit, expected_margin_percent,
+			sell_confidence, est_liquidation_days, conservative_value, carry_cost,
+			volume, station_name,
 			item_count, jumps, profit_per_jump
 		FROM contract_results WHERE scan_id = ?
 	`, scanID)
@@ -135,7 +141,9 @@ func (d *DB) GetContractResults(scanID int64) []engine.ContractResult {
 		var r engine.ContractResult
 		rows.Scan(
 			&r.ContractID, &r.Title, &r.Price, &r.MarketValue,
-			&r.Profit, &r.MarginPercent, &r.Volume, &r.StationName,
+			&r.Profit, &r.MarginPercent, &r.ExpectedProfit, &r.ExpectedMarginPercent,
+			&r.SellConfidence, &r.EstLiquidationDays, &r.ConservativeValue, &r.CarryCost,
+			&r.Volume, &r.StationName,
 			&r.ItemCount, &r.Jumps, &r.ProfitPerJump,
 		)
 		results = append(results, r)
@@ -159,8 +167,11 @@ func (d *DB) InsertStationResults(scanID int64, results []engine.StationTrade) {
 		scan_id, type_id, type_name, buy_price, sell_price,
 		margin, margin_pct, volume, buy_volume, sell_volume,
 		station_id, station_name, cts, sds, period_roi,
-		vwap, pvi, obds, bvs_ratio, dos
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		vwap, pvi, obds, bvs_ratio, dos,
+		daily_profit, real_profit, filled_qty, can_fill,
+		expected_profit, expected_buy_price, expected_sell_price,
+		slippage_buy_pct, slippage_sell_pct
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		tx.Rollback()
 		log.Printf("[DB] InsertStationResults prepare: %v", err)
@@ -169,11 +180,18 @@ func (d *DB) InsertStationResults(scanID int64, results []engine.StationTrade) {
 	defer stmt.Close()
 
 	for _, r := range results {
+		canFill := 0
+		if r.CanFill {
+			canFill = 1
+		}
 		stmt.Exec(
 			scanID, r.TypeID, r.TypeName, r.BuyPrice, r.SellPrice,
 			r.Spread, r.MarginPercent, r.DailyVolume, r.BuyVolume, r.SellVolume,
 			r.StationID, r.StationName, r.CTS, r.SDS, r.PeriodROI,
 			r.VWAP, r.PVI, r.OBDS, r.BvSRatio, r.DOS,
+			r.DailyProfit, r.RealProfit, r.FilledQty, canFill,
+			r.ExpectedProfit, r.ExpectedBuyPrice, r.ExpectedSellPrice,
+			r.SlippageBuyPct, r.SlippageSellPct,
 		)
 	}
 
@@ -188,7 +206,10 @@ func (d *DB) GetStationResults(scanID int64) []engine.StationTrade {
 		SELECT type_id, type_name, buy_price, sell_price,
 			margin, margin_pct, volume, buy_volume, sell_volume,
 			station_id, station_name, cts, sds, period_roi,
-			vwap, pvi, obds, bvs_ratio, dos
+			vwap, pvi, obds, bvs_ratio, dos,
+			daily_profit, real_profit, filled_qty, can_fill,
+			expected_profit, expected_buy_price, expected_sell_price,
+			slippage_buy_pct, slippage_sell_pct
 		FROM station_results WHERE scan_id = ?
 	`, scanID)
 	if err != nil {
@@ -199,12 +220,17 @@ func (d *DB) GetStationResults(scanID int64) []engine.StationTrade {
 	var results []engine.StationTrade
 	for rows.Next() {
 		var r engine.StationTrade
+		var canFill int
 		rows.Scan(
 			&r.TypeID, &r.TypeName, &r.BuyPrice, &r.SellPrice,
 			&r.Spread, &r.MarginPercent, &r.DailyVolume, &r.BuyVolume, &r.SellVolume,
 			&r.StationID, &r.StationName, &r.CTS, &r.SDS, &r.PeriodROI,
 			&r.VWAP, &r.PVI, &r.OBDS, &r.BvSRatio, &r.DOS,
+			&r.DailyProfit, &r.RealProfit, &r.FilledQty, &canFill,
+			&r.ExpectedProfit, &r.ExpectedBuyPrice, &r.ExpectedSellPrice,
+			&r.SlippageBuyPct, &r.SlippageSellPct,
 		)
+		r.CanFill = canFill != 0
 		results = append(results, r)
 	}
 	return results

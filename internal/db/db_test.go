@@ -95,6 +95,192 @@ func TestDB_FlipResultsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDB_StationResultsRoundTrip_WithExecutionFields(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	id := d.InsertHistory("station", "The Forge", 1, 10_000_000)
+	if id <= 0 {
+		t.Fatal("InsertHistory failed")
+	}
+
+	in := []engine.StationTrade{
+		{
+			TypeID:            34,
+			TypeName:          "Tritanium",
+			BuyPrice:          5.0,
+			SellPrice:         5.4,
+			Spread:            0.4,
+			MarginPercent:     7.5,
+			DailyVolume:       120000,
+			BuyVolume:         80000,
+			SellVolume:        90000,
+			StationID:         60003760,
+			StationName:       "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
+			CTS:               62.3,
+			SDS:               12,
+			PeriodROI:         18.1,
+			VWAP:              5.2,
+			PVI:               6.8,
+			OBDS:              1.4,
+			BvSRatio:          0.9,
+			DOS:               2.2,
+			DailyProfit:       1450000,
+			RealProfit:        1400000,
+			FilledQty:         40000,
+			CanFill:           true,
+			ExpectedProfit:    35.0,
+			ExpectedBuyPrice:  5.1,
+			ExpectedSellPrice: 5.45,
+			SlippageBuyPct:    0.2,
+			SlippageSellPct:   0.15,
+		},
+	}
+	d.InsertStationResults(id, in)
+
+	got := d.GetStationResults(id)
+	if len(got) != 1 {
+		t.Fatalf("GetStationResults len = %d, want 1", len(got))
+	}
+
+	r := got[0]
+	if r.DailyProfit != in[0].DailyProfit {
+		t.Errorf("DailyProfit = %v, want %v", r.DailyProfit, in[0].DailyProfit)
+	}
+	if r.RealProfit != in[0].RealProfit {
+		t.Errorf("RealProfit = %v, want %v", r.RealProfit, in[0].RealProfit)
+	}
+	if r.FilledQty != in[0].FilledQty {
+		t.Errorf("FilledQty = %d, want %d", r.FilledQty, in[0].FilledQty)
+	}
+	if r.CanFill != in[0].CanFill {
+		t.Errorf("CanFill = %v, want %v", r.CanFill, in[0].CanFill)
+	}
+	if r.ExpectedProfit != in[0].ExpectedProfit {
+		t.Errorf("ExpectedProfit = %v, want %v", r.ExpectedProfit, in[0].ExpectedProfit)
+	}
+}
+
+func TestDB_Migrate_StationResultsHasExecutionColumns(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	rows, err := d.sql.Query("PRAGMA table_info(station_results)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(station_results): %v", err)
+	}
+	defer rows.Close()
+
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan pragma row: %v", err)
+		}
+		have[name] = true
+	}
+
+	wantCols := []string{
+		"daily_profit",
+		"real_profit",
+		"filled_qty",
+		"can_fill",
+		"expected_profit",
+		"expected_buy_price",
+		"expected_sell_price",
+		"slippage_buy_pct",
+		"slippage_sell_pct",
+	}
+	for _, col := range wantCols {
+		if !have[col] {
+			t.Errorf("station_results missing column %q", col)
+		}
+	}
+}
+
+func TestDB_ContractResultsRoundTrip_WithLongHorizonFields(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	id := d.InsertHistory("contracts", "Jita", 1, 5_000_000)
+	in := []engine.ContractResult{
+		{
+			ContractID:             12345,
+			Title:                  "Test Contract",
+			Price:                  1_000_000_000,
+			MarketValue:            1_300_000_000,
+			Profit:                 200_000_000,
+			MarginPercent:          20,
+			ExpectedProfit:         120_000_000,
+			ExpectedMarginPercent:  12,
+			SellConfidence:         86.5,
+			EstLiquidationDays:     6.2,
+			ConservativeValue:      1_130_000_000,
+			CarryCost:              7_000_000,
+			Volume:                 12000,
+			StationName:            "Jita IV - Moon 4",
+			ItemCount:              12,
+			Jumps:                  0,
+			ProfitPerJump:          0,
+		},
+	}
+	d.InsertContractResults(id, in)
+	got := d.GetContractResults(id)
+	if len(got) != 1 {
+		t.Fatalf("GetContractResults len = %d, want 1", len(got))
+	}
+	r := got[0]
+	if r.ExpectedProfit != in[0].ExpectedProfit {
+		t.Errorf("ExpectedProfit = %v, want %v", r.ExpectedProfit, in[0].ExpectedProfit)
+	}
+	if r.SellConfidence != in[0].SellConfidence {
+		t.Errorf("SellConfidence = %v, want %v", r.SellConfidence, in[0].SellConfidence)
+	}
+	if r.EstLiquidationDays != in[0].EstLiquidationDays {
+		t.Errorf("EstLiquidationDays = %v, want %v", r.EstLiquidationDays, in[0].EstLiquidationDays)
+	}
+}
+
+func TestDB_Migrate_ContractResultsHasLongHorizonColumns(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	rows, err := d.sql.Query("PRAGMA table_info(contract_results)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(contract_results): %v", err)
+	}
+	defer rows.Close()
+
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan pragma row: %v", err)
+		}
+		have[name] = true
+	}
+
+	wantCols := []string{
+		"expected_profit",
+		"expected_margin_percent",
+		"sell_confidence",
+		"est_liquidation_days",
+		"conservative_value",
+		"carry_cost",
+	}
+	for _, col := range wantCols {
+		if !have[col] {
+			t.Errorf("contract_results missing column %q", col)
+		}
+	}
+}
+
 func TestDB_GetHistoryByID(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()

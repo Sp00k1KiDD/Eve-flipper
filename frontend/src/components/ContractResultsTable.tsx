@@ -20,7 +20,10 @@ const columnDefs: { key: SortKey; labelKey: TranslationKey; width: string; numer
   { key: "Title", labelKey: "colTitle", width: "min-w-[200px]", numeric: false },
   { key: "Price", labelKey: "colContractPrice", width: "min-w-[120px]", numeric: true },
   { key: "MarketValue", labelKey: "colMarketValue", width: "min-w-[120px]", numeric: true },
+  { key: "ExpectedProfit", labelKey: "colContractExpectedProfit", width: "min-w-[120px]", numeric: true },
   { key: "Profit", labelKey: "colContractProfit", width: "min-w-[120px]", numeric: true },
+  { key: "SellConfidence", labelKey: "colContractConfidence", width: "min-w-[95px]", numeric: true },
+  { key: "EstLiquidationDays", labelKey: "colContractLiqDays", width: "min-w-[85px]", numeric: true },
   { key: "MarginPercent", labelKey: "colContractMargin", width: "min-w-[80px]", numeric: true },
   { key: "Volume", labelKey: "colVolume", width: "min-w-[80px]", numeric: true },
   { key: "StationName", labelKey: "colStation", width: "min-w-[180px]", numeric: false },
@@ -42,7 +45,7 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
     ? "filters_too_strict"
     : "no_scan_yet";
 
-  const [sortKey, setSortKey] = useState<SortKey>("Profit");
+  const [sortKey, setSortKey] = useState<SortKey>("ExpectedProfit");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [showFilters, setShowFilters] = useState(false);
@@ -127,11 +130,15 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
+    const currentCol = columnDefs.find((c) => c.key === sortKey);
+    const numericSort = !!currentCol?.numeric;
     copy.sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
-      if (typeof av === "number" && typeof bv === "number") {
-        return sortDir === "asc" ? av - bv : bv - av;
+      if (numericSort) {
+        const an = typeof av === "number" ? av : 0;
+        const bn = typeof bv === "number" ? bv : 0;
+        return sortDir === "asc" ? an - bn : bn - an;
       }
       return sortDir === "asc"
         ? String(av).localeCompare(String(bv))
@@ -143,8 +150,9 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
   const summary = useMemo(() => {
     if (sorted.length === 0) return null;
     const totalProfit = sorted.reduce((sum, r) => sum + r.Profit, 0);
-    const avgMargin = sorted.reduce((sum, r) => sum + r.MarginPercent, 0) / sorted.length;
-    return { totalProfit, avgMargin, count: sorted.length };
+    const totalExpected = sorted.reduce((sum, r) => sum + (r.ExpectedProfit ?? r.Profit), 0);
+    const avgMargin = sorted.reduce((sum, r) => sum + (r.ExpectedMarginPercent ?? r.MarginPercent), 0) / sorted.length;
+    return { totalProfit, totalExpected, avgMargin, count: sorted.length };
   }, [sorted]);
 
   const toggleSort = (key: SortKey) => {
@@ -160,11 +168,20 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
 
   const formatCell = (col: (typeof columnDefs)[number], row: ContractResult): string => {
     const val = row[col.key];
-    if (col.key === "Price" || col.key === "MarketValue" || col.key === "Profit" || col.key === "ProfitPerJump") {
+    if (val == null || val === "") return "\u2014";
+    if (
+      col.key === "Price" ||
+      col.key === "MarketValue" ||
+      col.key === "Profit" ||
+      col.key === "ExpectedProfit" ||
+      col.key === "ProfitPerJump"
+    ) {
       return formatISK(val as number);
     }
-    if (col.key === "MarginPercent") return formatMargin(val as number);
+    if (col.key === "MarginPercent") return formatMargin((row.ExpectedMarginPercent ?? row.MarginPercent) as number);
+    if (col.key === "SellConfidence") return `${(val as number).toFixed(1)}%`;
     if (col.key === "Volume") return (val as number).toFixed(1);
+    if (col.key === "EstLiquidationDays") return (val as number).toFixed(1);
     if (typeof val === "number") return val.toLocaleString("ru-RU");
     return String(val);
   };
@@ -311,6 +328,10 @@ export function ContractResultsTable({ results, scanning, progress, filterHints 
           <span className="text-eve-dim">
             {t("totalProfit")}:{" "}
             <span className="text-eve-accent font-mono font-semibold">{formatISK(summary.totalProfit)}</span>
+          </span>
+          <span className="text-eve-dim">
+            {t("colContractExpectedProfit")}:{" "}
+            <span className="text-eve-success font-mono font-semibold">{formatISK(summary.totalExpected)}</span>
           </span>
           <span className="text-eve-dim">
             {t("avgMargin")}:{" "}

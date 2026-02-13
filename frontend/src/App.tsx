@@ -61,6 +61,8 @@ function App() {
     min_margin: 5,
     sales_tax_percent: 8,
     broker_fee_percent: 0,
+    contract_hold_days: 7,
+    contract_target_confidence: 80,
   });
   const configLoadedRef = useRef(false);
 
@@ -126,6 +128,8 @@ function App() {
       `${t("minContractPrice")}: ${formatISK(params.min_contract_price ?? 10_000_000)}`,
       `${t("maxContractMargin")}: ${params.max_contract_margin ?? 100}%`,
       `${t("minPricedRatio")}: ${((params.min_priced_ratio ?? 0.8) * 100).toFixed(0)}%`,
+      `${t("contractHoldDays")}: ${params.contract_hold_days ?? 7}`,
+      `${t("contractTargetConfidence")}: ${params.contract_target_confidence ?? 80}%`,
     ];
   }, [
     contractResults.length,
@@ -133,6 +137,8 @@ function App() {
     params.min_contract_price,
     params.max_contract_margin,
     params.min_priced_ratio,
+    params.contract_hold_days,
+    params.contract_target_confidence,
     t,
   ]);
 
@@ -809,6 +815,9 @@ function App() {
                 "max_contract_margin",
                 "min_priced_ratio",
                 "require_history",
+                "contract_instant_liquidation",
+                "contract_hold_days",
+                "contract_target_confidence",
                 "target_region",
               ];
               const filtered: Record<string, unknown> = {};

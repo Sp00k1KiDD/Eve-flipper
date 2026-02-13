@@ -578,17 +578,22 @@ func (s *Scanner) calculateResults(
 		filtered := make([]FlipResult, 0, len(results))
 		for i := range results {
 			r := &results[i]
+			requestedQty := r.UnitsToBuy
 			safeQty, planBuy, planSell, expectedProfit := findSafeExecutionQuantity(
 				sellByLT[locTypeKey{r.BuyLocationID, r.TypeID}],
 				buyByLT[locTypeKey{r.SellLocationID, r.TypeID}],
-				r.UnitsToBuy,
+				requestedQty,
 				brokerFeeRate,
 				taxMult,
 			)
 			if safeQty <= 0 {
 				continue
 			}
-			if safeQty != r.UnitsToBuy {
+
+			r.FilledQty = safeQty
+			r.CanFill = safeQty >= requestedQty
+
+			if safeQty != requestedQty {
 				r.UnitsToBuy = safeQty
 				r.TotalProfit = r.ProfitPerUnit * float64(safeQty)
 				if r.TotalJumps > 0 {
@@ -602,13 +607,17 @@ func (s *Scanner) calculateResults(
 			r.SlippageBuyPct = planBuy.SlippagePercent
 			r.SlippageSellPct = planSell.SlippagePercent
 			r.ExpectedProfit = expectedProfit
+			r.RealProfit = expectedProfit
 			filtered = append(filtered, *r)
 		}
 		results = filtered
 
-		// Re-sort because safe qty can reduce TotalProfit.
+		// Re-sort by real profit (depth/slippage-aware KPI).
 		sort.Slice(results, func(i, j int) bool {
-			return results[i].TotalProfit > results[j].TotalProfit
+			if results[i].RealProfit == results[j].RealProfit {
+				return results[i].TotalProfit > results[j].TotalProfit
+			}
+			return results[i].RealProfit > results[j].RealProfit
 		})
 	}
 
@@ -656,7 +665,11 @@ func (s *Scanner) calculateResults(
 				sellablePerDay = dailyShare
 			}
 		}
-		results[i].DailyProfit = results[i].ProfitPerUnit * float64(sellablePerDay)
+		profitPerUnit := results[i].ProfitPerUnit
+		if results[i].FilledQty > 0 && results[i].RealProfit > 0 {
+			profitPerUnit = results[i].RealProfit / float64(results[i].FilledQty)
+		}
+		results[i].DailyProfit = profitPerUnit * float64(sellablePerDay)
 	}
 
 	// Post-filter: min daily volume

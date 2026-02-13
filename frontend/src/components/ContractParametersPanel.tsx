@@ -26,11 +26,17 @@ export function ContractParametersPanel({ params, onChange }: Props) {
     `**${t("maxContractMargin")}**: контракты с маржой выше этого значения скорее всего скам`,
     `**${t("minPricedRatio")}**: минимальный % предметов, которые должны иметь рыночную цену`,
     `**${t("requireHistory")}**: требовать историю торговли для более точной оценки (медленнее)`,
+    `**${t("contractInstantLiquidation")}**: считать только то, что можно сразу продать в buy orders в радиусе продажи`,
+    `**${t("contractHoldDays")}**: горизонт в днях для оценки вероятности полной распродажи`,
+    `**${t("contractTargetConfidence")}**: минимальная вероятность полной распродажи за горизонт`,
   ] : [
     `**${t("minContractPrice")}**: filter contracts below this price (bait protection)`,
     `**${t("maxContractMargin")}**: contracts above this margin are likely scams`,
     `**${t("minPricedRatio")}**: minimum % of items that must have market price`,
     `**${t("requireHistory")}**: require trading history for accurate pricing (slower)`,
+    `**${t("contractInstantLiquidation")}**: keep only contracts that can be sold immediately into buy orders within sell radius`,
+    `**${t("contractHoldDays")}**: horizon in days for liquidation probability modeling`,
+    `**${t("contractTargetConfidence")}**: minimum full-liquidation probability within the horizon`,
   ];
 
   return (
@@ -76,6 +82,33 @@ export function ContractParametersPanel({ params, onChange }: Props) {
           <SettingsCheckbox
             checked={params.require_history ?? false}
             onChange={(v) => set("require_history", v)}
+          />
+        </SettingsField>
+
+        <SettingsField label={t("contractInstantLiquidation")}>
+          <SettingsCheckbox
+            checked={params.contract_instant_liquidation ?? false}
+            onChange={(v) => set("contract_instant_liquidation", v)}
+          />
+        </SettingsField>
+
+        <SettingsField label={t("contractHoldDays")}>
+          <SettingsNumberInput
+            value={params.contract_hold_days ?? 7}
+            onChange={(v) => set("contract_hold_days", v)}
+            min={1}
+            max={180}
+            step={1}
+          />
+        </SettingsField>
+
+        <SettingsField label={t("contractTargetConfidence")}>
+          <SettingsNumberInput
+            value={params.contract_target_confidence ?? 80}
+            onChange={(v) => set("contract_target_confidence", v)}
+            min={10}
+            max={100}
+            step={5}
           />
         </SettingsField>
       </SettingsGrid>

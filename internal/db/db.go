@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"eve-flipper/internal/logger"
 
@@ -118,6 +119,12 @@ func (d *DB) migrate() error {
 				market_value    REAL,
 				profit          REAL,
 				margin_percent  REAL,
+				expected_profit REAL NOT NULL DEFAULT 0,
+				expected_margin_percent REAL NOT NULL DEFAULT 0,
+				sell_confidence REAL NOT NULL DEFAULT 0,
+				est_liquidation_days REAL NOT NULL DEFAULT 0,
+				conservative_value REAL NOT NULL DEFAULT 0,
+				carry_cost REAL NOT NULL DEFAULT 0,
 				volume          REAL,
 				station_name    TEXT,
 				item_count      INTEGER,
@@ -381,7 +388,85 @@ func (d *DB) migrate() error {
 		logger.Info("DB", "Applied migration v10 (route results)")
 	}
 
+	if version < 11 {
+		// Extend station_results with execution-aware and daily-profit fields.
+		// This keeps scan history consistent with current Station Trading model.
+		stationCols := []struct {
+			name string
+			def  string
+		}{
+			{name: "daily_profit", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "real_profit", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "filled_qty", def: "INTEGER NOT NULL DEFAULT 0"},
+			{name: "can_fill", def: "INTEGER NOT NULL DEFAULT 0"},
+			{name: "expected_profit", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "expected_buy_price", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "expected_sell_price", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "slippage_buy_pct", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "slippage_sell_pct", def: "REAL NOT NULL DEFAULT 0"},
+		}
+		for _, c := range stationCols {
+			if err := d.ensureTableColumn("station_results", c.name, c.def); err != nil {
+				return fmt.Errorf("migration v11 add station_results.%s: %w", c.name, err)
+			}
+		}
+		if _, err := d.sql.Exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (11);`); err != nil {
+			return fmt.Errorf("migration v11: %w", err)
+		}
+		logger.Info("DB", "Applied migration v11 (station_results execution fields)")
+	}
+
+	if version < 12 {
+		contractCols := []struct {
+			name string
+			def  string
+		}{
+			{name: "expected_profit", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "expected_margin_percent", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "sell_confidence", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "est_liquidation_days", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "conservative_value", def: "REAL NOT NULL DEFAULT 0"},
+			{name: "carry_cost", def: "REAL NOT NULL DEFAULT 0"},
+		}
+		for _, c := range contractCols {
+			if err := d.ensureTableColumn("contract_results", c.name, c.def); err != nil {
+				return fmt.Errorf("migration v12 add contract_results.%s: %w", c.name, err)
+			}
+		}
+		if _, err := d.sql.Exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (12);`); err != nil {
+			return fmt.Errorf("migration v12: %w", err)
+		}
+		logger.Info("DB", "Applied migration v12 (contract_results long-horizon fields)")
+	}
+
 	return nil
+}
+
+func (d *DB) ensureTableColumn(tableName, columnName, columnDef string) error {
+	rows, err := d.sql.Query("PRAGMA table_info(" + tableName + ")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, columnName) {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = d.sql.Exec("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + columnDef)
+	return err
 }
 
 // SqlDB returns the underlying *sql.DB for use by other packages (e.g. auth store).

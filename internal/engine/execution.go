@@ -53,8 +53,26 @@ func ComputeExecutionPlan(orders []esi.MarketOrder, quantity int32, isBuy bool) 
 		volume int32
 	}
 	levelMap := make(map[float64]int32)
+	filteredDepth := int32(0)
 	for _, o := range orders {
+		// Buy simulation consumes sell orders (asks), sell simulation consumes buy orders (bids).
+		if isBuy && o.IsBuyOrder {
+			continue
+		}
+		if !isBuy && !o.IsBuyOrder {
+			continue
+		}
 		levelMap[o.Price] += o.VolumeRemain
+		filteredDepth += o.VolumeRemain
+	}
+	// Backward-compatible fallback: some callers/tests pass pre-filtered slices
+	// without reliable IsBuyOrder flags. If side-filter removed everything, use
+	// all provided orders as-is.
+	if filteredDepth == 0 {
+		levelMap = make(map[float64]int32)
+		for _, o := range orders {
+			levelMap[o.Price] += o.VolumeRemain
+		}
 	}
 	var levels []level
 	for p, v := range levelMap {
