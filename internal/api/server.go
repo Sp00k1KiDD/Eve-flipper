@@ -18,6 +18,7 @@ import (
 	"eve-flipper/internal/esi"
 	"eve-flipper/internal/sde"
 	"eve-flipper/internal/zkillboard"
+	"golang.org/x/sync/singleflight"
 )
 
 // Server is the HTTP API server that connects the ESI client, scanner engine, and database.
@@ -46,10 +47,12 @@ type Server struct {
 	txnCacheCharacterID int64
 
 	// PLEX dashboard cache (TTL 5 min) to avoid hammering ESI with 5 concurrent requests per click.
-	plexCacheMu   sync.RWMutex
-	plexCache     *engine.PLEXDashboard
-	plexCacheTime time.Time
-	plexCacheKey  string // "salesTax_brokerFee_nesE_nesM_nesO"
+	plexCacheMu    sync.RWMutex
+	plexCache      *engine.PLEXDashboard
+	plexCacheTime  time.Time
+	plexCacheKey   string // "salesTax_brokerFee_nesE_nesM_nesO"
+	plexBuildGroup singleflight.Group
+	plexBuildSem   chan struct{} // global limiter for heavy PLEX refreshes
 
 	// Corporation demo provider (initialized on SDE load).
 	demoCorpProvider *corp.DemoCorpProvider
@@ -62,6 +65,8 @@ type ssoStateEntry struct {
 }
 
 const walletTxnCacheTTL = 2 * time.Minute
+const plexCacheTTL = 5 * time.Minute
+const plexStaleCacheTTL = 30 * time.Minute
 
 func (s *Server) getWalletTxnCache(characterID int64) ([]esi.WalletTransaction, bool) {
 	s.txnCacheMu.RLock()
@@ -102,15 +107,38 @@ func (s *Server) clearWalletTxnCache() {
 	s.txnCacheMu.Unlock()
 }
 
+func (s *Server) getPLEXCache(cacheKey string, maxAge time.Duration) (engine.PLEXDashboard, bool) {
+	s.plexCacheMu.RLock()
+	defer s.plexCacheMu.RUnlock()
+
+	if s.plexCache == nil || s.plexCacheKey != cacheKey {
+		return engine.PLEXDashboard{}, false
+	}
+	age := time.Since(s.plexCacheTime)
+	if age >= maxAge {
+		return engine.PLEXDashboard{}, false
+	}
+	return *s.plexCache, true
+}
+
+func (s *Server) setPLEXCache(cacheKey string, dashboard engine.PLEXDashboard) {
+	s.plexCacheMu.Lock()
+	s.plexCache = &dashboard
+	s.plexCacheTime = time.Now()
+	s.plexCacheKey = cacheKey
+	s.plexCacheMu.Unlock()
+}
+
 // NewServer creates a Server with the given config, ESI client, and database.
 func NewServer(cfg *config.Config, esiClient *esi.Client, database *db.DB, ssoConfig *auth.SSOConfig, sessions *auth.SessionStore) *Server {
 	return &Server{
-		cfg:       cfg,
-		esi:       esiClient,
-		db:        database,
-		sso:       ssoConfig,
-		sessions:  sessions,
-		ssoStates: make(map[string]ssoStateEntry),
+		cfg:          cfg,
+		esi:          esiClient,
+		db:           database,
+		sso:          ssoConfig,
+		sessions:     sessions,
+		ssoStates:    make(map[string]ssoStateEntry),
+		plexBuildSem: make(chan struct{}, 1),
 	}
 }
 
@@ -245,6 +273,33 @@ func filterFlipResultsExcludeStructures(results []engine.FlipResult) []engine.Fl
 		filtered = append(filtered, r)
 	}
 	return filtered
+}
+
+func flipResultKPIProfit(r engine.FlipResult) float64 {
+	if r.RealProfit > 0 {
+		return r.RealProfit
+	}
+	if r.ExpectedProfit > 0 {
+		return r.ExpectedProfit
+	}
+	return r.TotalProfit
+}
+
+func stationTradeKPIProfit(r engine.StationTrade) float64 {
+	if r.DailyProfit != 0 {
+		return r.DailyProfit
+	}
+	if r.RealProfit > 0 {
+		return r.RealProfit
+	}
+	return r.TotalProfit
+}
+
+func contractResultKPIProfit(r engine.ContractResult) float64 {
+	if r.ExpectedProfit > 0 {
+		return r.ExpectedProfit
+	}
+	return r.Profit
 }
 
 func filterRouteResultsExcludeStructures(results []engine.RouteResult) []engine.RouteResult {
@@ -580,10 +635,13 @@ type scanRequest struct {
 	MinRouteSecurity float64 `json:"min_route_security"` // 0 = all; 0.45 = highsec only; 0.7 = min 0.7
 	TargetRegion     string  `json:"target_region"`      // Empty = search all by radius; region name = search only in that region
 	// Contract-specific filters
-	MinContractPrice  float64 `json:"min_contract_price"`
-	MaxContractMargin float64 `json:"max_contract_margin"`
-	MinPricedRatio    float64 `json:"min_priced_ratio"`
-	RequireHistory    bool    `json:"require_history"`
+	MinContractPrice           float64 `json:"min_contract_price"`
+	MaxContractMargin          float64 `json:"max_contract_margin"`
+	MinPricedRatio             float64 `json:"min_priced_ratio"`
+	RequireHistory             bool    `json:"require_history"`
+	ContractInstantLiquidation bool    `json:"contract_instant_liquidation"`
+	ContractHoldDays           int     `json:"contract_hold_days"`
+	ContractTargetConfidence   float64 `json:"contract_target_confidence"`
 	// Player structures
 	IncludeStructures bool `json:"include_structures"`
 }
@@ -614,21 +672,24 @@ func (s *Server) parseScanParams(req scanRequest) (engine.ScanParams, error) {
 	}
 
 	return engine.ScanParams{
-		CurrentSystemID:   systemID,
-		CargoCapacity:     req.CargoCapacity,
-		BuyRadius:         req.BuyRadius,
-		SellRadius:        req.SellRadius,
-		MinMargin:         req.MinMargin,
-		SalesTaxPercent:   req.SalesTaxPercent,
-		BrokerFeePercent:  req.BrokerFeePercent,
-		MinDailyVolume:    req.MinDailyVolume,
-		MaxInvestment:     req.MaxInvestment,
-		MinRouteSecurity:  req.MinRouteSecurity,
-		TargetRegionID:    targetRegionID,
-		MinContractPrice:  req.MinContractPrice,
-		MaxContractMargin: req.MaxContractMargin,
-		MinPricedRatio:    req.MinPricedRatio,
-		RequireHistory:    req.RequireHistory,
+		CurrentSystemID:            systemID,
+		CargoCapacity:              req.CargoCapacity,
+		BuyRadius:                  req.BuyRadius,
+		SellRadius:                 req.SellRadius,
+		MinMargin:                  req.MinMargin,
+		SalesTaxPercent:            req.SalesTaxPercent,
+		BrokerFeePercent:           req.BrokerFeePercent,
+		MinDailyVolume:             req.MinDailyVolume,
+		MaxInvestment:              req.MaxInvestment,
+		MinRouteSecurity:           req.MinRouteSecurity,
+		TargetRegionID:             targetRegionID,
+		MinContractPrice:           req.MinContractPrice,
+		MaxContractMargin:          req.MaxContractMargin,
+		MinPricedRatio:             req.MinPricedRatio,
+		RequireHistory:             req.RequireHistory,
+		ContractInstantLiquidation: req.ContractInstantLiquidation,
+		ContractHoldDays:           req.ContractHoldDays,
+		ContractTargetConfidence:   req.ContractTargetConfidence,
 	}, nil
 }
 
@@ -688,10 +749,11 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	topProfit := 0.0
 	totalProfit := 0.0
 	for _, r := range results {
-		if r.TotalProfit > topProfit {
-			topProfit = r.TotalProfit
+		kpiProfit := flipResultKPIProfit(r)
+		if kpiProfit > topProfit {
+			topProfit = kpiProfit
 		}
-		totalProfit += r.TotalProfit
+		totalProfit += kpiProfit
 	}
 	scanID := s.db.InsertHistoryFull("radius", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertFlipResults(scanID, results)
@@ -764,10 +826,11 @@ func (s *Server) handleScanMultiRegion(w http.ResponseWriter, r *http.Request) {
 	topProfit := 0.0
 	totalProfit := 0.0
 	for _, r := range results {
-		if r.TotalProfit > topProfit {
-			topProfit = r.TotalProfit
+		kpiProfit := flipResultKPIProfit(r)
+		if kpiProfit > topProfit {
+			topProfit = kpiProfit
 		}
-		totalProfit += r.TotalProfit
+		totalProfit += kpiProfit
 	}
 	scanID := s.db.InsertHistoryFull("region", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertFlipResults(scanID, results)
@@ -833,10 +896,11 @@ func (s *Server) handleScanContracts(w http.ResponseWriter, r *http.Request) {
 	topProfit := 0.0
 	totalProfit := 0.0
 	for _, r := range results {
-		if r.Profit > topProfit {
-			topProfit = r.Profit
+		kpiProfit := contractResultKPIProfit(r)
+		if kpiProfit > topProfit {
+			topProfit = kpiProfit
 		}
-		totalProfit += r.Profit
+		totalProfit += kpiProfit
 	}
 	scanID := s.db.InsertHistoryFull("contracts", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertContractResults(scanID, results)
@@ -1202,10 +1266,11 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 	topProfit := 0.0
 	totalProfit := 0.0
 	for _, r := range allResults {
-		if r.TotalProfit > topProfit {
-			topProfit = r.TotalProfit
+		p := stationTradeKPIProfit(r)
+		if p > topProfit {
+			topProfit = p
 		}
-		totalProfit += r.TotalProfit
+		totalProfit += p
 	}
 
 	// Save to history with full params
@@ -2711,6 +2776,82 @@ func (s *Server) handleDemandRefresh(w http.ResponseWriter, r *http.Request) {
 
 // --- PLEX+ ---
 
+func (s *Server) buildPLEXDashboard(salesTax, brokerFee float64, nes engine.NESPrices, omegaUSD float64) (engine.PLEXDashboard, error) {
+	// 1) PLEX orders from Global PLEX Market (region 19000001)
+	plexOrders, plexErr := s.esi.FetchRegionOrdersByType(engine.GlobalPLEXRegionID, engine.PLEXTypeID)
+	if plexErr != nil {
+		log.Printf("[PLEX] Failed to fetch global PLEX orders: %v", plexErr)
+	}
+
+	// 2) Related items (Extractor, Injector, MPTC) from Jita
+	relatedTypes := []int32{engine.SkillExtractorTypeID, engine.LargeSkillInjTypeID, engine.MPTCTypeID}
+	relatedOrders := make(map[int32][]esi.MarketOrder, len(relatedTypes))
+	for _, tid := range relatedTypes {
+		orders, err := s.esi.FetchRegionOrdersByType(engine.JitaRegionID, tid)
+		if err != nil {
+			log.Printf("[PLEX] Failed to fetch type %d orders: %v", tid, err)
+			continue
+		}
+		relatedOrders[tid] = orders
+	}
+
+	// 3) PLEX price history from Global PLEX Market
+	history, histErr := s.esi.FetchMarketHistory(engine.GlobalPLEXRegionID, engine.PLEXTypeID)
+	if histErr != nil {
+		log.Printf("[PLEX] Failed to fetch history: %v", histErr)
+	}
+
+	// 4) Related item histories for fill-time estimation
+	// MPTC (34133) is not tradable on the regular market → ESI returns 400 for history.
+	historyTypes := []int32{engine.SkillExtractorTypeID, engine.LargeSkillInjTypeID}
+	relatedHistory := make(map[int32][]esi.HistoryEntry, len(historyTypes))
+	for _, tid := range historyTypes {
+		entries, err := s.esi.FetchMarketHistory(engine.JitaRegionID, tid)
+		if err != nil {
+			log.Printf("[PLEX] Failed to fetch history for type %d: %v", tid, err)
+			continue
+		}
+		relatedHistory[tid] = entries
+	}
+
+	// 5) Cross-hub orders: 3 items × 3 non-Jita regions
+	// Jita orders are already in relatedOrders, so we only need Amarr, Dodixie, Rens.
+	crossHubRegions := []int32{10000043, 10000032, 10000030} // Amarr, Dodixie, Rens
+	crossHubOrders := make(map[int32]map[int32][]esi.MarketOrder, len(relatedTypes))
+	for _, tid := range relatedTypes {
+		for _, rid := range crossHubRegions {
+			orders, err := s.esi.FetchRegionOrdersByType(rid, tid)
+			if err != nil {
+				log.Printf("[PLEX] Failed to fetch cross-hub type %d region %d: %v", tid, rid, err)
+				continue
+			}
+			if crossHubOrders[tid] == nil {
+				crossHubOrders[tid] = make(map[int32][]esi.MarketOrder)
+			}
+			crossHubOrders[tid][rid] = orders
+		}
+	}
+
+	// Include Jita orders in cross-hub map for comparison.
+	for tid, orders := range relatedOrders {
+		if crossHubOrders[tid] == nil {
+			crossHubOrders[tid] = make(map[int32][]esi.MarketOrder)
+		}
+		crossHubOrders[tid][engine.JitaRegionID] = orders
+	}
+
+	log.Printf("[PLEX] Global orders: %d, history: %d, related types: %d, related histories: %d, cross-hub types: %d",
+		len(plexOrders), len(history), len(relatedOrders), len(relatedHistory), len(crossHubOrders))
+
+	// If ESI is fully unavailable, prefer stale cache instead of returning an empty dashboard.
+	if len(plexOrders) == 0 && len(relatedOrders) == 0 && len(history) == 0 {
+		return engine.PLEXDashboard{}, fmt.Errorf("ESI unavailable: no PLEX market data")
+	}
+
+	dashboard := engine.ComputePLEXDashboard(plexOrders, relatedOrders, history, relatedHistory, salesTax, brokerFee, nes, omegaUSD, crossHubOrders)
+	return dashboard, nil
+}
+
 func (s *Server) handlePLEXDashboard(w http.ResponseWriter, r *http.Request) {
 	if !s.isReady() {
 		writeError(w, 503, "SDE not loaded yet")
@@ -2749,163 +2890,53 @@ func (s *Server) handlePLEXDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Check cache (5 min TTL, keyed by user params)
 	cacheKey := fmt.Sprintf("%.2f_%.2f_%d_%d_%d_%.2f", salesTax, brokerFee, nes.ExtractorPLEX, nes.MPTCPLEX, nes.OmegaPLEX, omegaUSD)
-	s.plexCacheMu.RLock()
-	if s.plexCache != nil && s.plexCacheKey == cacheKey && time.Since(s.plexCacheTime) < 5*time.Minute {
-		cached := s.plexCache
-		s.plexCacheMu.RUnlock()
-		log.Printf("[PLEX] Serving from cache (age: %v)", time.Since(s.plexCacheTime).Round(time.Second))
+	if cached, ok := s.getPLEXCache(cacheKey, plexCacheTTL); ok {
+		log.Printf("[PLEX] Serving fresh cache")
 		writeJSON(w, cached)
 		return
 	}
-	s.plexCacheMu.RUnlock()
-
-	// All fetches run in parallel:
-	// 1. PLEX orders from Global PLEX Market (region 19000001)
-	// 2. Related items (Extractor, Injector, MPTC) from Jita
-	// 3. PLEX price history from Global PLEX Market
-
-	type ordersResult struct {
-		orders []esi.MarketOrder
-		err    error
+	// Safety for tests/manual Server{} construction.
+	if s.plexBuildSem == nil {
+		s.plexCacheMu.Lock()
+		if s.plexBuildSem == nil {
+			s.plexBuildSem = make(chan struct{}, 1)
+		}
+		s.plexCacheMu.Unlock()
 	}
-	plexCh := make(chan ordersResult, 1)
-	go func() {
-		orders, err := s.esi.FetchRegionOrdersByType(engine.GlobalPLEXRegionID, engine.PLEXTypeID)
-		plexCh <- ordersResult{orders, err}
-	}()
 
-	relatedTypes := []int32{engine.SkillExtractorTypeID, engine.LargeSkillInjTypeID, engine.MPTCTypeID}
-	type typeResult struct {
-		typeID int32
-		orders []esi.MarketOrder
-	}
-	relCh := make(chan typeResult, len(relatedTypes))
-	for _, tid := range relatedTypes {
-		go func(t int32) {
-			orders, err := s.esi.FetchRegionOrdersByType(engine.JitaRegionID, t)
-			if err != nil {
-				log.Printf("[PLEX] Failed to fetch type %d orders: %v", t, err)
-				relCh <- typeResult{t, nil}
-				return
+	value, err, shared := s.plexBuildGroup.Do(cacheKey, func() (interface{}, error) {
+		// Another request may have already populated cache while we were queued.
+		if cached, ok := s.getPLEXCache(cacheKey, plexCacheTTL); ok {
+			return cached, nil
+		}
+
+		s.plexBuildSem <- struct{}{}
+		defer func() { <-s.plexBuildSem }()
+
+		dashboard, buildErr := s.buildPLEXDashboard(salesTax, brokerFee, nes, omegaUSD)
+		if buildErr != nil {
+			if stale, ok := s.getPLEXCache(cacheKey, plexStaleCacheTTL); ok {
+				log.Printf("[PLEX] Using stale cache due ESI issues: %v", buildErr)
+				return stale, nil
 			}
-			relCh <- typeResult{t, orders}
-		}(tid)
-	}
-
-	type histResult struct {
-		entries []esi.HistoryEntry
-		err     error
-	}
-	histCh := make(chan histResult, 1)
-	go func() {
-		entries, err := s.esi.FetchMarketHistory(engine.GlobalPLEXRegionID, engine.PLEXTypeID)
-		histCh <- histResult{entries, err}
-	}()
-
-	// Fetch related item histories for fill-time estimation (parallelized)
-	// MPTC (34133) is not tradable on the regular market → ESI returns 400 for history.
-	historyTypes := []int32{engine.SkillExtractorTypeID, engine.LargeSkillInjTypeID}
-	type relHistResult struct {
-		typeID  int32
-		entries []esi.HistoryEntry
-	}
-	relHistCh := make(chan relHistResult, len(historyTypes))
-	for _, tid := range historyTypes {
-		go func(t int32) {
-			entries, err := s.esi.FetchMarketHistory(engine.JitaRegionID, t)
-			if err != nil {
-				log.Printf("[PLEX] Failed to fetch history for type %d: %v", t, err)
-				relHistCh <- relHistResult{t, nil}
-				return
-			}
-			relHistCh <- relHistResult{t, entries}
-		}(tid)
-	}
-
-	// Fetch cross-hub orders: 3 items × 3 non-Jita regions = 9 ESI calls (parallelized)
-	// Jita orders are already in relatedOrders, so we only need Amarr, Dodixie, Rens.
-	crossHubRegions := []int32{10000043, 10000032, 10000030} // Amarr, Dodixie, Rens
-	type crossHubResult struct {
-		typeID   int32
-		regionID int32
-		orders   []esi.MarketOrder
-	}
-	crossCh := make(chan crossHubResult, len(relatedTypes)*len(crossHubRegions))
-	for _, tid := range relatedTypes {
-		for _, rid := range crossHubRegions {
-			go func(t, r int32) {
-				orders, err := s.esi.FetchRegionOrdersByType(r, t)
-				if err != nil {
-					log.Printf("[PLEX] Failed to fetch cross-hub type %d region %d: %v", t, r, err)
-					crossCh <- crossHubResult{t, r, nil}
-					return
-				}
-				crossCh <- crossHubResult{t, r, orders}
-			}(tid, rid)
+			return nil, buildErr
 		}
+
+		s.setPLEXCache(cacheKey, dashboard)
+		return dashboard, nil
+	})
+	if err != nil {
+		writeError(w, 502, fmt.Sprintf("failed to fetch PLEX dashboard: %v", err))
+		return
 	}
-
-	// Collect results
-	plexRes := <-plexCh
-	if plexRes.err != nil {
-		log.Printf("[PLEX] Failed to fetch global PLEX orders: %v", plexRes.err)
+	dashboard, ok := value.(engine.PLEXDashboard)
+	if !ok {
+		writeError(w, 500, "unexpected PLEX dashboard type")
+		return
 	}
-
-	relatedOrders := make(map[int32][]esi.MarketOrder)
-	for range relatedTypes {
-		res := <-relCh
-		if res.orders != nil {
-			relatedOrders[res.typeID] = res.orders
-		}
+	if shared {
+		log.Printf("[PLEX] Shared in-flight dashboard build")
 	}
-
-	histRes := <-histCh
-	history := histRes.entries
-	if histRes.err != nil {
-		log.Printf("[PLEX] Failed to fetch history: %v", histRes.err)
-	}
-
-	relatedHistory := make(map[int32][]esi.HistoryEntry)
-	for range historyTypes {
-		res := <-relHistCh
-		if res.entries != nil {
-			relatedHistory[res.typeID] = res.entries
-		}
-	}
-
-	// Collect cross-hub orders: typeID → regionID → orders
-	crossHubOrders := make(map[int32]map[int32][]esi.MarketOrder)
-	for range relatedTypes {
-		for range crossHubRegions {
-			res := <-crossCh
-			if res.orders != nil {
-				if crossHubOrders[res.typeID] == nil {
-					crossHubOrders[res.typeID] = make(map[int32][]esi.MarketOrder)
-				}
-				crossHubOrders[res.typeID][res.regionID] = res.orders
-			}
-		}
-	}
-	// Also include Jita orders in cross-hub map for comparison
-	for tid, orders := range relatedOrders {
-		if crossHubOrders[tid] == nil {
-			crossHubOrders[tid] = make(map[int32][]esi.MarketOrder)
-		}
-		crossHubOrders[tid][engine.JitaRegionID] = orders
-	}
-
-	log.Printf("[PLEX] Global orders: %d, history: %d, related types: %d, related histories: %d, cross-hub types: %d",
-		len(plexRes.orders), len(history), len(relatedOrders), len(relatedHistory), len(crossHubOrders))
-
-	dashboard := engine.ComputePLEXDashboard(plexRes.orders, relatedOrders, history, relatedHistory, salesTax, brokerFee, nes, omegaUSD, crossHubOrders)
-
-	// Store in cache
-	s.plexCacheMu.Lock()
-	s.plexCache = &dashboard
-	s.plexCacheTime = time.Now()
-	s.plexCacheKey = cacheKey
-	s.plexCacheMu.Unlock()
-
 	writeJSON(w, dashboard)
 }
 

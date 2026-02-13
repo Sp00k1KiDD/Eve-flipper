@@ -55,6 +55,12 @@ func (n NESPrices) Resolve() (extractor, mptc, omega int) {
 // Jita region for related item lookups.
 const JitaRegionID int32 = 10000002
 
+// Jita solar system (used to avoid "best price somewhere in The Forge" artifacts).
+const JitaSystemID int32 = 30000142
+
+// Jita 4-4 station (Caldari Navy Assembly Plant) for station-specific pricing.
+const JitaStationID int64 = 60003760
+
 // SP training constants
 // Formula: SP/min = primary_attribute + secondary_attribute/2
 // Optimal remap (27 primary / 21 secondary): 37.5 SP/min = 2250 SP/hr
@@ -127,7 +133,7 @@ type CrossHubArbitrage struct {
 	TypeID    int32   `json:"type_id"`
 	BestHub   string  `json:"best_hub"`   // hub with cheapest sell price
 	BestPrice float64 `json:"best_price"` // best sell price
-	JitaPrice float64 `json:"jita_price"` // Jita sell price
+	JitaPrice float64 `json:"jita_price"` // Jita buy price (instant liquidation benchmark)
 	DiffPct   float64 `json:"diff_pct"`   // (jita - best) / best * 100
 	ProfitISK float64 `json:"profit_isk"` // per unit after fees
 	Viable    bool    `json:"viable"`
@@ -160,12 +166,12 @@ type ArbHistoryPoint struct {
 // MarketDepthInfo holds order-book depth for key items relevant to PLEX arbitrage.
 type MarketDepthInfo struct {
 	PLEXSellDepth5   DepthSummary `json:"plex_sell_depth_5"`  // top 5 PLEX sell levels
-	ExtractorSellQty int64        `json:"extractor_sell_qty"` // total extractor sell volume near best
-	ExtractorBuyQty  int64        `json:"extractor_buy_qty"`  // total extractor buy volume near best
-	InjectorSellQty  int64        `json:"injector_sell_qty"`  // total injector sell volume near best
-	InjectorBuyQty   int64        `json:"injector_buy_qty"`   // total injector buy volume near best
-	MPTCSellQty      int64        `json:"mptc_sell_qty"`      // total MPTC sell volume near best
-	MPTCBuyQty       int64        `json:"mptc_buy_qty"`       // total MPTC buy volume near best
+	ExtractorSellQty int64        `json:"extractor_sell_qty"` // total extractor sell volume (scoped hub slice)
+	ExtractorBuyQty  int64        `json:"extractor_buy_qty"`  // total extractor buy volume (scoped hub slice)
+	InjectorSellQty  int64        `json:"injector_sell_qty"`  // total injector sell volume (scoped hub slice)
+	InjectorBuyQty   int64        `json:"injector_buy_qty"`   // total injector buy volume (scoped hub slice)
+	MPTCSellQty      int64        `json:"mptc_sell_qty"`      // total MPTC sell volume (scoped hub slice)
+	MPTCBuyQty       int64        `json:"mptc_buy_qty"`       // total MPTC buy volume (scoped hub slice)
 	// Time-to-fill estimates (hours to sell 1 unit, based on daily volume)
 	ExtractorFillHours float64 `json:"extractor_fill_hours"`
 	InjectorFillHours  float64 `json:"injector_fill_hours"`
@@ -347,6 +353,10 @@ func ComputePLEXDashboard(
 	// Sort history chronologically once; pass sorted slice to all sub-functions.
 	sortedHist := sortHistory(history)
 
+	// Scope related item orders to Jita hub:
+	// 1) Jita 4-4 station, 2) Jita system, 3) region fallback.
+	scopedRelatedOrders := scopeOrdersToHub(relatedOrders, JitaStationID, JitaSystemID)
+
 	// ---- Global PLEX price ----
 	globalPrice := computeGlobalPLEXPrice(plexOrders, sortedHist)
 
@@ -356,18 +366,28 @@ func ComputePLEXDashboard(
 	}
 
 	// ---- Related item prices (Jita) ----
-	extractorSell := bestSellPrice(relatedOrders[SkillExtractorTypeID])
-	extractorBuy := bestBuyPrice(relatedOrders[SkillExtractorTypeID])
-	injectorSell := bestSellPrice(relatedOrders[LargeSkillInjTypeID])
-	injectorBuy := bestBuyPrice(relatedOrders[LargeSkillInjTypeID])
-	mptcSell := bestSellPrice(relatedOrders[MPTCTypeID])
-	mptcBuy := bestBuyPrice(relatedOrders[MPTCTypeID])
+	extractorSell := bestSellPrice(scopedRelatedOrders[SkillExtractorTypeID])
+	extractorBuy := bestBuyPrice(scopedRelatedOrders[SkillExtractorTypeID])
+	injectorSell := bestSellPrice(scopedRelatedOrders[LargeSkillInjTypeID])
+	injectorBuy := bestBuyPrice(scopedRelatedOrders[LargeSkillInjTypeID])
+	mptcSell := bestSellPrice(scopedRelatedOrders[MPTCTypeID])
+	mptcBuy := bestBuyPrice(scopedRelatedOrders[MPTCTypeID])
 
 	// Net revenue multiplier: in EVE, broker fee and sales tax are both
 	// percentage deductions from the order price.
 	netMult := 1.0 - salesTaxPct/100 - brokerFeePct/100
 	// For instant sell (selling to buy orders), only sales tax applies; no broker fee
 	salesTaxOnly := 1.0 - salesTaxPct/100
+	// Cost of generating 500k SP via training time (sustainable SP supply model).
+	// This removes phantom "free SP" profit from SP-chain paths.
+	spTimeCostPerInjector := 0.0
+	if plexPrice > 0 {
+		extractorsPerMonth := BaseSPPerHour * HoursPerMonth / float64(SPPerExtractor)
+		if extractorsPerMonth > 0 {
+			omegaCostISK := float64(nesOmega) * plexPrice
+			spTimeCostPerInjector = omegaCostISK / extractorsPerMonth
+		}
+	}
 
 	// ---- NES Arbitrage ----
 	var arbitrage []ArbitragePath
@@ -400,11 +420,12 @@ func ComputePLEXDashboard(
 
 	// Path 2: NES Extractor → Extract SP → Sell Injector
 	{
-		cost := float64(nesExtractor) * plexPrice
+		cost := float64(nesExtractor)*plexPrice + spTimeCostPerInjector
 		noData := injectorSell <= 0
 		revenue := injectorSell * netMult
 		profit := revenue - cost
-		be := safeDiv(revenue, float64(nesExtractor))
+		plexCoef := float64(nesExtractor) + safeDiv(float64(nesOmega), BaseSPPerHour*HoursPerMonth/float64(SPPerExtractor))
+		be := safeDiv(revenue, plexCoef)
 		arbitrage = append(arbitrage, ArbitragePath{
 			Name:          "SP Chain (NES Extractor → Injector)",
 			Type:          "nes_process",
@@ -416,7 +437,7 @@ func ComputePLEXDashboard(
 			ROI:           safeDiv(profit, cost) * 100,
 			Viable:        profit > 0 && !noData,
 			NoData:        noData,
-			Detail:        "Buy Extractor from NES, extract SP, sell Injector",
+			Detail:        "Buy Extractor from NES, convert trained SP to Injector, sell on market (includes SP time cost)",
 			BreakEvenPLEX: be,
 			EstMinutes:    10,
 			ISKPerHour:    safeDiv(profit, 10.0/60),
@@ -451,7 +472,7 @@ func ComputePLEXDashboard(
 	// Path 4: Market Extractor → Extract SP → Sell Injector
 	// Compare buying extractor directly from market vs NES
 	{
-		cost := extractorSell // buy extractor from market (lowest sell order)
+		cost := extractorSell + spTimeCostPerInjector // extractor buy + SP time cost
 		noData := extractorSell <= 0 || injectorSell <= 0
 		revenue := injectorSell * netMult
 		profit := revenue - cost
@@ -466,7 +487,7 @@ func ComputePLEXDashboard(
 			ROI:          safeDiv(profit, cost) * 100,
 			Viable:       profit > 0 && !noData,
 			NoData:       noData,
-			Detail:       "Buy Extractor from market, extract SP, sell Injector",
+			Detail:       "Buy Extractor from market, convert trained SP to Injector, sell on market (includes SP time cost)",
 			EstMinutes:   10,
 			ISKPerHour:   safeDiv(profit, 10.0/60),
 		})
@@ -576,39 +597,39 @@ func ComputePLEXDashboard(
 		switch {
 		case arb.Type == "nes_sell" && arb.Name == "Skill Extractor (NES → Sell)":
 			// Sell 1 extractor: walk buy orders
-			plan := ComputeExecutionPlan(relatedOrders[SkillExtractorTypeID], 1, false)
+			plan := ComputeExecutionPlan(scopedRelatedOrders[SkillExtractorTypeID], 1, false)
 			arb.SlippagePct = plan.SlippagePercent
-			adjRev := plan.ExpectedPrice * netMult
+			adjRev := plan.ExpectedPrice * salesTaxOnly
 			if adjRev <= 0 {
 				adjRev = arb.RevenueISK
 			}
 			arb.AdjustedProfitISK = adjRev - arb.CostISK
 		case arb.Type == "nes_process":
 			// Sell 1 injector: walk buy orders
-			plan := ComputeExecutionPlan(relatedOrders[LargeSkillInjTypeID], 1, false)
+			plan := ComputeExecutionPlan(scopedRelatedOrders[LargeSkillInjTypeID], 1, false)
 			arb.SlippagePct = plan.SlippagePercent
-			adjRev := plan.ExpectedPrice * netMult
+			adjRev := plan.ExpectedPrice * salesTaxOnly
 			if adjRev <= 0 {
 				adjRev = arb.RevenueISK
 			}
 			arb.AdjustedProfitISK = adjRev - arb.CostISK
 		case arb.Type == "nes_sell" && arb.Name == "MPTC (NES → Sell)":
 			// Sell 1 MPTC: walk buy orders
-			plan := ComputeExecutionPlan(relatedOrders[MPTCTypeID], 1, false)
+			plan := ComputeExecutionPlan(scopedRelatedOrders[MPTCTypeID], 1, false)
 			arb.SlippagePct = plan.SlippagePercent
-			adjRev := plan.ExpectedPrice * netMult
+			adjRev := plan.ExpectedPrice * salesTaxOnly
 			if adjRev <= 0 {
 				adjRev = arb.RevenueISK
 			}
 			arb.AdjustedProfitISK = adjRev - arb.CostISK
 		case arb.Type == "market_process":
 			// Buy 1 extractor from market (walk sell orders) + sell 1 injector (walk buy orders)
-			buyPlan := ComputeExecutionPlan(relatedOrders[SkillExtractorTypeID], 1, true)
-			sellPlan := ComputeExecutionPlan(relatedOrders[LargeSkillInjTypeID], 1, false)
+			buyPlan := ComputeExecutionPlan(scopedRelatedOrders[SkillExtractorTypeID], 1, true)
+			sellPlan := ComputeExecutionPlan(scopedRelatedOrders[LargeSkillInjTypeID], 1, false)
 			// Combined slippage: buy side + sell side
 			arb.SlippagePct = buyPlan.SlippagePercent + sellPlan.SlippagePercent
-			adjCost := buyPlan.ExpectedPrice
-			adjRev := sellPlan.ExpectedPrice * netMult
+			adjCost := buyPlan.ExpectedPrice + spTimeCostPerInjector
+			adjRev := sellPlan.ExpectedPrice * salesTaxOnly
 			if adjCost <= 0 {
 				adjCost = arb.CostISK
 			}
@@ -642,7 +663,7 @@ func ComputePLEXDashboard(
 	arbHistory := computeArbHistory(sortedHist, extractorSell, injectorSell, mptcSell, netMult, nesExtractor, nesMPTC, nesOmega)
 
 	// ---- Market Depth + Fill Times ----
-	marketDepth := computeMarketDepth(plexOrders, relatedOrders, history, relatedHistory)
+	marketDepth := computeMarketDepth(plexOrders, scopedRelatedOrders, history, relatedHistory)
 
 	// ---- Signal ----
 	signal := computeSignal(indicators, globalPrice)
@@ -686,7 +707,7 @@ func ComputePLEXDashboard(
 	// ---- Cross-Hub Arbitrage ----
 	var crossHub []CrossHubArbitrage
 	if len(crossHubOrders) > 0 {
-		crossHub = computeCrossHubArbitrage(crossHubOrders, netMult)
+		crossHub = computeCrossHubArbitrage(crossHubOrders, salesTaxOnly)
 	}
 
 	return PLEXDashboard{
@@ -1461,6 +1482,54 @@ func bestBuyPrice(orders []esi.MarketOrder) float64 {
 	return best
 }
 
+func ordersInSystem(orders []esi.MarketOrder, systemID int32) []esi.MarketOrder {
+	if len(orders) == 0 || systemID <= 0 {
+		return nil
+	}
+	filtered := make([]esi.MarketOrder, 0, len(orders))
+	for _, o := range orders {
+		if o.SystemID == systemID {
+			filtered = append(filtered, o)
+		}
+	}
+	return filtered
+}
+
+func ordersInLocation(orders []esi.MarketOrder, locationID int64) []esi.MarketOrder {
+	if len(orders) == 0 || locationID <= 0 {
+		return nil
+	}
+	filtered := make([]esi.MarketOrder, 0, len(orders))
+	for _, o := range orders {
+		if o.LocationID == locationID {
+			filtered = append(filtered, o)
+		}
+	}
+	return filtered
+}
+
+func scopeOrdersToHub(ordersByType map[int32][]esi.MarketOrder, locationID int64, systemID int32) map[int32][]esi.MarketOrder {
+	if len(ordersByType) == 0 {
+		return map[int32][]esi.MarketOrder{}
+	}
+	out := make(map[int32][]esi.MarketOrder, len(ordersByType))
+	for typeID, orders := range ordersByType {
+		filtered := ordersInLocation(orders, locationID)
+		if len(filtered) > 0 {
+			out[typeID] = filtered
+			continue
+		}
+		filtered = ordersInSystem(orders, systemID)
+		if len(filtered) > 0 {
+			out[typeID] = filtered
+			continue
+		}
+		// Fallback: no station/system-specific orders returned for this type.
+		out[typeID] = orders
+	}
+	return out
+}
+
 // convertHistory converts sorted HistoryEntry slice to PricePoint slice,
 // keeping only the last MaxHistoryPoints entries.
 // history must be sorted chronologically (ascending by date).
@@ -1535,7 +1604,7 @@ var crossHubItems = []struct {
 
 // computeCrossHubArbitrage compares sell prices across 4 hubs for SP-related items.
 // crossHubOrders: typeID → regionID → orders
-func computeCrossHubArbitrage(crossHubOrders map[int32]map[int32][]esi.MarketOrder, netMult float64) []CrossHubArbitrage {
+func computeCrossHubArbitrage(crossHubOrders map[int32]map[int32][]esi.MarketOrder, salesTaxOnly float64) []CrossHubArbitrage {
 	var results []CrossHubArbitrage
 
 	for _, item := range crossHubItems {
@@ -1544,13 +1613,16 @@ func computeCrossHubArbitrage(crossHubOrders map[int32]map[int32][]esi.MarketOrd
 			continue
 		}
 
-		// Find best sell price per hub
-		jitaPrice := bestSellPrice(regionOrders[JitaRegionID])
-		if jitaPrice <= 0 {
+		// Realizable-now benchmark: buy cheap in another hub, liquidate in Jita to top buy order.
+		jitaBuy := bestBuyPrice(regionOrders[JitaRegionID])
+		if jitaBuy <= 0 {
 			continue
 		}
 
-		bestPrice := jitaPrice
+		bestPrice := bestSellPrice(regionOrders[JitaRegionID])
+		if bestPrice <= 0 {
+			continue
+		}
 		bestHub := "Jita"
 		for _, hub := range crossHubRegions {
 			sell := bestSellPrice(regionOrders[hub.RegionID])
@@ -1560,8 +1632,8 @@ func computeCrossHubArbitrage(crossHubOrders map[int32]map[int32][]esi.MarketOrd
 			}
 		}
 
-		diffPct := safeDiv(jitaPrice-bestPrice, bestPrice) * 100
-		profitISK := (jitaPrice*netMult - bestPrice) // buy cheap, sell in Jita after fees
+		diffPct := safeDiv(jitaBuy-bestPrice, bestPrice) * 100
+		profitISK := (jitaBuy*salesTaxOnly - bestPrice) // instant liquidation in Jita buy orders
 		viable := diffPct > 1.0 && profitISK > 0
 
 		results = append(results, CrossHubArbitrage{
@@ -1569,7 +1641,7 @@ func computeCrossHubArbitrage(crossHubOrders map[int32]map[int32][]esi.MarketOrd
 			TypeID:    item.TypeID,
 			BestHub:   bestHub,
 			BestPrice: bestPrice,
-			JitaPrice: jitaPrice,
+			JitaPrice: jitaBuy,
 			DiffPct:   diffPct,
 			ProfitISK: profitISK,
 			Viable:    viable,

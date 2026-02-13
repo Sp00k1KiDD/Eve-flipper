@@ -650,6 +650,204 @@ func TestComputePLEXDashboard_DefaultTaxes(t *testing.T) {
 	}
 }
 
+func TestComputePLEXDashboard_UsesJitaSystemOrdersWhenAvailable(t *testing.T) {
+	plexOrders := []esi.MarketOrder{
+		{Price: 5_000_000, IsBuyOrder: false, TypeID: PLEXTypeID},
+	}
+	related := map[int32][]esi.MarketOrder{
+		SkillExtractorTypeID: {
+			// Better price exists outside Jita system (should be ignored when Jita-system orders exist)
+			{Price: 250_000_000, IsBuyOrder: false, SystemID: 30002187},
+			{Price: 300_000_000, IsBuyOrder: false, SystemID: JitaSystemID},
+			{Price: 280_000_000, IsBuyOrder: true, SystemID: JitaSystemID},
+		},
+		LargeSkillInjTypeID: {
+			{Price: 900_000_000, IsBuyOrder: false, SystemID: JitaSystemID},
+			{Price: 850_000_000, IsBuyOrder: true, SystemID: JitaSystemID},
+		},
+		MPTCTypeID: {
+			{Price: 600_000_000, IsBuyOrder: false, SystemID: JitaSystemID},
+			{Price: 550_000_000, IsBuyOrder: true, SystemID: JitaSystemID},
+		},
+	}
+	history := generateHistory(30, 4_800_000, 0, 80_000)
+	nes := NESPrices{ExtractorPLEX: 293, MPTCPLEX: 485, OmegaPLEX: 500}
+
+	dash := ComputePLEXDashboard(plexOrders, related, history, nil, 3.6, 1.0, nes, 0, nil)
+
+	var ext *ArbitragePath
+	for i := range dash.Arbitrage {
+		if dash.Arbitrage[i].Name == "Skill Extractor (NES → Sell)" {
+			ext = &dash.Arbitrage[i]
+			break
+		}
+	}
+	if ext == nil {
+		t.Fatal("missing extractor path")
+	}
+	if !almostEqual(ext.RevenueGross, 300_000_000, 1) {
+		t.Errorf("RevenueGross = %f, want 300000000 (Jita system price)", ext.RevenueGross)
+	}
+}
+
+func TestComputePLEXDashboard_SPChainIncludesSPTimeCost(t *testing.T) {
+	plexOrders := []esi.MarketOrder{
+		{Price: 5_000_000, IsBuyOrder: false, TypeID: PLEXTypeID},
+	}
+	related := map[int32][]esi.MarketOrder{
+		SkillExtractorTypeID: {
+			{Price: 300_000_000, IsBuyOrder: false},
+			{Price: 280_000_000, IsBuyOrder: true},
+		},
+		LargeSkillInjTypeID: {
+			{Price: 900_000_000, IsBuyOrder: false},
+			{Price: 850_000_000, IsBuyOrder: true},
+		},
+		MPTCTypeID: {
+			{Price: 600_000_000, IsBuyOrder: false},
+			{Price: 550_000_000, IsBuyOrder: true},
+		},
+	}
+	history := generateHistory(30, 4_800_000, 0, 80_000)
+	nes := NESPrices{ExtractorPLEX: 293, MPTCPLEX: 485, OmegaPLEX: 500}
+
+	dash := ComputePLEXDashboard(plexOrders, related, history, nil, 3.6, 1.0, nes, 0, nil)
+
+	spPerInjectorCost := (float64(nes.OmegaPLEX) * 5_000_000.0) / (BaseSPPerHour * HoursPerMonth / float64(SPPerExtractor))
+
+	var nesSP *ArbitragePath
+	var marketSP *ArbitragePath
+	for i := range dash.Arbitrage {
+		switch dash.Arbitrage[i].Name {
+		case "SP Chain (NES Extractor → Injector)":
+			nesSP = &dash.Arbitrage[i]
+		case "SP Chain (Market Extractor → Injector)":
+			marketSP = &dash.Arbitrage[i]
+		}
+	}
+	if nesSP == nil || marketSP == nil {
+		t.Fatal("missing SP chain paths")
+	}
+
+	wantNESCost := float64(nes.ExtractorPLEX)*5_000_000.0 + spPerInjectorCost
+	if !almostEqual(nesSP.CostISK, wantNESCost, 1) {
+		t.Errorf("NES SP chain cost = %f, want %f", nesSP.CostISK, wantNESCost)
+	}
+	wantMarketCost := 300_000_000.0 + spPerInjectorCost
+	if !almostEqual(marketSP.CostISK, wantMarketCost, 1) {
+		t.Errorf("Market SP chain cost = %f, want %f", marketSP.CostISK, wantMarketCost)
+	}
+}
+
+func TestComputePLEXDashboard_PrefersJitaStationOverSystem(t *testing.T) {
+	plexOrders := []esi.MarketOrder{
+		{Price: 5_000_000, IsBuyOrder: false, TypeID: PLEXTypeID},
+	}
+	related := map[int32][]esi.MarketOrder{
+		SkillExtractorTypeID: {
+			{Price: 310_000_000, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: JitaStationID},
+			{Price: 300_000_000, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: 60008494},
+			{Price: 285_000_000, IsBuyOrder: true, SystemID: JitaSystemID, LocationID: JitaStationID},
+		},
+		LargeSkillInjTypeID: {
+			{Price: 920_000_000, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: JitaStationID},
+			{Price: 870_000_000, IsBuyOrder: true, SystemID: JitaSystemID, LocationID: JitaStationID},
+		},
+		MPTCTypeID: {
+			{Price: 600_000_000, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: JitaStationID},
+			{Price: 550_000_000, IsBuyOrder: true, SystemID: JitaSystemID, LocationID: JitaStationID},
+		},
+	}
+	history := generateHistory(30, 4_800_000, 0, 80_000)
+	nes := NESPrices{ExtractorPLEX: 293, MPTCPLEX: 485, OmegaPLEX: 500}
+
+	dash := ComputePLEXDashboard(plexOrders, related, history, nil, 3.6, 1.0, nes, 0, nil)
+
+	var ext *ArbitragePath
+	for i := range dash.Arbitrage {
+		if dash.Arbitrage[i].Name == "Skill Extractor (NES → Sell)" {
+			ext = &dash.Arbitrage[i]
+			break
+		}
+	}
+	if ext == nil {
+		t.Fatal("missing extractor path")
+	}
+	if !almostEqual(ext.RevenueGross, 310_000_000, 1) {
+		t.Errorf("RevenueGross = %f, want 310000000 (Jita 4-4 station price)", ext.RevenueGross)
+	}
+}
+
+func TestComputePLEXDashboard_AdjustedNESRevenueUsesSalesTaxOnly(t *testing.T) {
+	plexOrders := []esi.MarketOrder{
+		{Price: 1, IsBuyOrder: false, TypeID: PLEXTypeID},
+	}
+	related := map[int32][]esi.MarketOrder{
+		SkillExtractorTypeID: {
+			{Price: 100, VolumeRemain: 100, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: JitaStationID},
+			{Price: 80, VolumeRemain: 100, IsBuyOrder: true, SystemID: JitaSystemID, LocationID: JitaStationID},
+		},
+		LargeSkillInjTypeID: {
+			{Price: 100, VolumeRemain: 100, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: JitaStationID},
+			{Price: 80, VolumeRemain: 100, IsBuyOrder: true, SystemID: JitaSystemID, LocationID: JitaStationID},
+		},
+		MPTCTypeID: {
+			{Price: 100, VolumeRemain: 100, IsBuyOrder: false, SystemID: JitaSystemID, LocationID: JitaStationID},
+			{Price: 80, VolumeRemain: 100, IsBuyOrder: true, SystemID: JitaSystemID, LocationID: JitaStationID},
+		},
+	}
+	history := generateHistory(10, 1, 0, 1000)
+	nes := NESPrices{ExtractorPLEX: 1, MPTCPLEX: 1, OmegaPLEX: 1}
+
+	dash := ComputePLEXDashboard(plexOrders, related, history, nil, 10.0, 10.0, nes, 0, nil)
+
+	var ext *ArbitragePath
+	for i := range dash.Arbitrage {
+		if dash.Arbitrage[i].Name == "Skill Extractor (NES → Sell)" {
+			ext = &dash.Arbitrage[i]
+			break
+		}
+	}
+	if ext == nil {
+		t.Fatal("missing extractor path")
+	}
+	// Expected price from buy book = 80; instant sell revenue uses sales tax only: 80 * 0.9 = 72.
+	// Cost = 1 PLEX * 1 ISK = 1. Adjusted profit = 71.
+	if !almostEqual(ext.AdjustedProfitISK, 71, 1e-6) {
+		t.Errorf("AdjustedProfitISK = %f, want 71", ext.AdjustedProfitISK)
+	}
+}
+
+func TestComputeCrossHubArbitrage_UsesJitaBuyAndSalesTaxOnly(t *testing.T) {
+	cross := map[int32]map[int32][]esi.MarketOrder{
+		SkillExtractorTypeID: {
+			JitaRegionID: {
+				{Price: 200, IsBuyOrder: false},
+				{Price: 150, IsBuyOrder: true},
+			},
+			10000043: { // Amarr
+				{Price: 100, IsBuyOrder: false},
+			},
+		},
+	}
+
+	items := computeCrossHubArbitrage(cross, 0.9)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(items))
+	}
+	got := items[0]
+	if got.BestHub != "Amarr" {
+		t.Errorf("BestHub = %q, want Amarr", got.BestHub)
+	}
+	wantProfit := 150*0.9 - 100
+	if !almostEqual(got.ProfitISK, wantProfit, 1e-9) {
+		t.Errorf("ProfitISK = %f, want %f", got.ProfitISK, wantProfit)
+	}
+	if !got.Viable {
+		t.Error("expected viable cross-hub trade")
+	}
+}
+
 // ===================================================================
 // Tests: NESPrices.Resolve
 // ===================================================================
