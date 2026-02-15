@@ -20,7 +20,6 @@ import { Modal } from "./components/Modal";
 import { CharacterPopup } from "./components/CharacterPopup";
 import {
   getConfig,
-  sendAlertNotification,
   updateConfig,
   scan,
   scanMultiRegion,
@@ -136,6 +135,7 @@ function App() {
   const [alertTestLoading, setAlertTestLoading] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  const desktopAlertCooldownRef = useRef<Map<string, number>>(new Map());
   const { addToast } = useGlobalToast();
 
   const [contractScanCompleted, setContractScanCompleted] = useState(false);
@@ -371,66 +371,71 @@ function App() {
         } else {
           setRegionResults(results);
         }
-        // Check watchlist alerts
-        try {
-          const wl = await getWatchlist();
-          for (const item of wl) {
-            const metric =
-              item.alert_metric === "total_profit" ||
-              item.alert_metric === "profit_per_unit" ||
-              item.alert_metric === "daily_volume" ||
-              item.alert_metric === "margin_percent"
-                ? item.alert_metric
-                : "margin_percent";
-            const threshold = Math.max(
-              0,
-              item.alert_threshold ?? item.alert_min_margin ?? 0,
-            );
-            const enabled =
-              typeof item.alert_enabled === "boolean"
-                ? item.alert_enabled
-                : threshold > 0;
-            if (!enabled || threshold <= 0) continue;
+        // Desktop alerts are local-only; external channels are handled by backend scan handlers.
+        if (alertChannels.desktop) {
+          try {
+            const wl = await getWatchlist();
+            const now = Date.now();
+            for (const item of wl) {
+              const metric =
+                item.alert_metric === "total_profit" ||
+                item.alert_metric === "profit_per_unit" ||
+                item.alert_metric === "daily_volume" ||
+                item.alert_metric === "margin_percent"
+                  ? item.alert_metric
+                  : "margin_percent";
+              const threshold = Math.max(
+                0,
+                item.alert_threshold ?? item.alert_min_margin ?? 0,
+              );
+              const enabled =
+                typeof item.alert_enabled === "boolean"
+                  ? item.alert_enabled
+                  : threshold > 0;
+              if (!enabled || threshold <= 0) continue;
 
-            const match = results.find((r) => r.TypeID === item.type_id);
-            if (!match) continue;
+              const match = results.find((r) => r.TypeID === item.type_id);
+              if (!match) continue;
 
-            const current =
-              metric === "margin_percent"
-                ? match.MarginPercent
-                : metric === "total_profit"
-                  ? match.TotalProfit
-                  : metric === "profit_per_unit"
-                    ? match.ProfitPerUnit
-                    : match.DailyVolume;
+              const current =
+                metric === "margin_percent"
+                  ? match.MarginPercent
+                  : metric === "total_profit"
+                    ? match.TotalProfit
+                    : metric === "profit_per_unit"
+                      ? match.ProfitPerUnit
+                      : match.DailyVolume;
 
-            if (current < threshold) continue;
+              if (current < threshold) continue;
 
-            const metricLabel =
-              metric === "margin_percent"
-                ? t("watchlistMetricMargin")
-                : metric === "total_profit"
-                  ? t("watchlistMetricTotalProfit")
-                  : metric === "profit_per_unit"
-                    ? t("watchlistMetricProfitPerUnit")
-                    : t("watchlistMetricDailyVolume");
-            const currentText =
-              metric === "margin_percent"
-                ? `${current.toFixed(2)}%`
-                : metric === "daily_volume"
-                  ? `${Math.round(current).toLocaleString()}`
-                  : formatISK(current);
-            const thresholdText =
-              metric === "margin_percent"
-                ? `${threshold.toFixed(2)}%`
-                : metric === "daily_volume"
-                  ? `${Math.round(threshold).toLocaleString()}`
-                  : formatISK(threshold);
-            const msg = `${match.TypeName}: ${metricLabel} ${currentText} >= ${thresholdText}`;
-            if (alertChannels.telegram || alertChannels.discord) {
-              void sendAlertNotification(msg).catch(() => {});
-            }
-            if (alertChannels.desktop) {
+              const cooldownKey = `${item.type_id}:${metric}:${threshold}`;
+              const lastSentAt =
+                desktopAlertCooldownRef.current.get(cooldownKey) ?? 0;
+              if (now - lastSentAt < 3_600_000) continue;
+              desktopAlertCooldownRef.current.set(cooldownKey, now);
+
+              const metricLabel =
+                metric === "margin_percent"
+                  ? t("watchlistMetricMargin")
+                  : metric === "total_profit"
+                    ? t("watchlistMetricTotalProfit")
+                    : metric === "profit_per_unit"
+                      ? t("watchlistMetricProfitPerUnit")
+                      : t("watchlistMetricDailyVolume");
+              const currentText =
+                metric === "margin_percent"
+                  ? `${current.toFixed(2)}%`
+                  : metric === "daily_volume"
+                    ? `${Math.round(current).toLocaleString()}`
+                    : formatISK(current);
+              const thresholdText =
+                metric === "margin_percent"
+                  ? `${threshold.toFixed(2)}%`
+                  : metric === "daily_volume"
+                    ? `${Math.round(threshold).toLocaleString()}`
+                    : formatISK(threshold);
+              const msg = `${match.TypeName}: ${metricLabel} ${currentText} >= ${thresholdText}`;
+
               addToast(msg, "success");
               if ("Notification" in window) {
                 if (Notification.permission === "granted") {
@@ -444,9 +449,10 @@ function App() {
                 }
               }
             }
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : t("watchlistError");
+            addToast(`${t("watchlistError")}: ${reason}`, "error", 3000);
           }
-        } catch {
-          /* ignore */
         }
       }
     } catch (e: unknown) {
@@ -880,7 +886,11 @@ function App() {
           <div
             className={`flex-1 min-h-0 flex flex-col ${tab === "route" ? "" : "hidden"}`}
           >
-            <RouteBuilder params={params} loadedResults={routeLoadedResults} />
+            <RouteBuilder
+              params={params}
+              loadedResults={routeLoadedResults}
+              isLoggedIn={authStatus.logged_in}
+            />
           </div>
           <div
             className={`flex-1 min-h-0 flex flex-col ${tab === "industry" ? "" : "hidden"}`}

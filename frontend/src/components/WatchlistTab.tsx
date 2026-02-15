@@ -246,7 +246,7 @@ export function WatchlistTab({
           cmp = a.threshold - b.threshold;
           break;
         case "margin":
-          cmp = (a.match?.MarginPercent ?? -1) - (b.match?.MarginPercent ?? -1);
+          cmp = a.current - b.current;
           break;
         case "profit":
           cmp = (a.match?.TotalProfit ?? -1) - (b.match?.TotalProfit ?? -1);
@@ -333,7 +333,7 @@ export function WatchlistTab({
         2000,
       );
     } catch {
-      addToast("Invalid clipboard data", "error", 3000);
+      addToast(t("watchlistImportInvalid"), "error", 3000);
     }
   };
 
@@ -359,7 +359,7 @@ export function WatchlistTab({
     },
     {
       key: "margin",
-      label: t("watchlistCurrentMargin"),
+      label: t("watchlistAlertCurrentValue"),
       align: "text-right",
       width: "min-w-[80px]",
     },
@@ -507,10 +507,10 @@ export function WatchlistTab({
                     {item.match ? (
                       <span
                         className={
-                          item.match.MarginPercent > 10 ? "text-green-400" : "text-eve-accent"
+                          item.isAlert ? "text-green-400" : "text-eve-accent"
                         }
                       >
-                        {formatMargin(item.match.MarginPercent)}
+                        {formatMetricValue(item.metric, item.current)}
                       </span>
                     ) : (
                       <span className="text-eve-dim">—</span>

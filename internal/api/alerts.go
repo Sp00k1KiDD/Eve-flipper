@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"eve-flipper/internal/db"
+	"eve-flipper/internal/engine"
 )
 
 const (
-	// DefaultAlertCooldownSeconds is the minimum time between repeat alerts for the same item/metric/threshold.
-	DefaultAlertCooldownSeconds = 3600 // 1 hour
+	// DefaultAlertCooldown is the minimum time between repeat alerts for the same item/metric/threshold.
+	DefaultAlertCooldown = time.Hour
 )
 
 // AlertCheckResult describes whether an alert should be sent and contains necessary metadata.
@@ -70,7 +71,7 @@ func (s *Server) CheckWatchlistAlerts(results interface{}) []AlertCheckResult {
 		cooldownActive := false
 		if !lastAlertTime.IsZero() {
 			elapsed := time.Since(lastAlertTime)
-			if elapsed < DefaultAlertCooldownSeconds*time.Second {
+			if elapsed < DefaultAlertCooldown {
 				cooldownActive = true
 				log.Printf("[ALERT] Cooldown active for %s (last alert: %v ago)", typeName, elapsed.Round(time.Second))
 				continue
@@ -96,6 +97,23 @@ func (s *Server) CheckWatchlistAlerts(results interface{}) []AlertCheckResult {
 	return alerts
 }
 
+// processWatchlistAlerts evaluates alerts for a result set and sends all triggered alerts.
+func (s *Server) processWatchlistAlerts(results interface{}, scanID *int64) {
+	// Desktop notifications are handled on frontend; backend processes only external channels.
+	if s.cfg == nil || (!s.cfg.AlertTelegram && !s.cfg.AlertDiscord) {
+		return
+	}
+	alerts := s.CheckWatchlistAlerts(results)
+	if len(alerts) == 0 {
+		return
+	}
+	for _, alert := range alerts {
+		if err := s.SendAlert(alert, scanID); err != nil {
+			log.Printf("[ALERT] Failed sending alert for type %d: %v", alert.TypeID, err)
+		}
+	}
+}
+
 // SendAlert sends an alert via configured channels and records it in history.
 func (s *Server) SendAlert(alert AlertCheckResult, scanID *int64) error {
 	// Send via configured channels
@@ -104,11 +122,6 @@ func (s *Server) SendAlert(alert AlertCheckResult, scanID *int64) error {
 	// Record in history
 	channelsSent := result.Sent
 	channelsFailed := result.Failed
-
-	// Always include desktop as sent (frontend will show toast)
-	if s.cfg.AlertDesktop {
-		channelsSent = append(channelsSent, "desktop")
-	}
 
 	entry := db.AlertHistoryEntry{
 		WatchlistTypeID: alert.TypeID,
@@ -137,21 +150,21 @@ func (s *Server) SendAlert(alert AlertCheckResult, scanID *int64) error {
 func (s *Server) extractMetricValue(typeID int32, metric string, results interface{}) (float64, string, bool) {
 	// Try to cast results to different types
 	switch r := results.(type) {
-	case []FlipResult:
+	case []engine.FlipResult:
 		for _, item := range r {
 			if item.TypeID == typeID {
 				value := extractFlipMetric(item, metric)
 				return value, item.TypeName, true
 			}
 		}
-	case []StationTrade:
+	case []engine.StationTrade:
 		for _, item := range r {
 			if item.TypeID == typeID {
 				value := extractStationMetric(item, metric)
 				return value, item.TypeName, true
 			}
 		}
-	case []ContractResult:
+	case []engine.ContractResult:
 		// Contracts don't have type_id, skip for now
 		return 0, "", false
 	default:
@@ -161,7 +174,7 @@ func (s *Server) extractMetricValue(typeID int32, metric string, results interfa
 	return 0, "", false
 }
 
-func extractFlipMetric(item FlipResult, metric string) float64 {
+func extractFlipMetric(item engine.FlipResult, metric string) float64 {
 	switch metric {
 	case "margin_percent":
 		return item.MarginPercent
@@ -176,16 +189,16 @@ func extractFlipMetric(item FlipResult, metric string) float64 {
 	}
 }
 
-func extractStationMetric(item StationTrade, metric string) float64 {
+func extractStationMetric(item engine.StationTrade, metric string) float64 {
 	switch metric {
 	case "margin_percent":
-		return item.MarginPct
+		return item.MarginPercent
 	case "total_profit":
-		return item.Margin * float64(item.Volume)
+		return item.TotalProfit
 	case "profit_per_unit":
-		return item.Margin
+		return item.ProfitPerUnit
 	case "daily_volume":
-		return item.BuyVolume + item.SellVolume // approximation
+		return float64(item.DailyVolume)
 	default:
 		return 0
 	}
@@ -209,45 +222,4 @@ func (s *Server) formatAlertMessage(typeName, metric string, threshold, current 
 	default:
 		return fmt.Sprintf("%s: %s %.2f >= %.2f", typeName, metric, current, threshold)
 	}
-}
-
-// FlipResult is duplicated here to avoid import cycle (should be in engine package).
-// This is a temporary workaround.
-type FlipResult struct {
-	TypeID         int32
-	TypeName       string
-	MarginPercent  float64
-	TotalProfit    float64
-	ProfitPerUnit  float64
-	DailyVolume    int64
-	BuyPrice       float64
-	SellPrice      float64
-	UnitsToBuy     int32
-	BuyStation     string
-	SellStation    string
-	BuySystemName  string
-	SellSystemName string
-}
-
-// StationTrade is duplicated here to avoid import cycle.
-type StationTrade struct {
-	TypeID     int32
-	TypeName   string
-	BuyPrice   float64
-	SellPrice  float64
-	Margin     float64
-	MarginPct  float64
-	Volume     float64
-	BuyVolume  float64
-	SellVolume float64
-}
-
-// ContractResult is duplicated here to avoid import cycle.
-type ContractResult struct {
-	ContractID    int32
-	Title         string
-	Price         float64
-	MarketValue   float64
-	Profit        float64
-	MarginPercent float64
 }

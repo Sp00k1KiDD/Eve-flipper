@@ -55,6 +55,19 @@ func (d *DB) SaveAlertHistory(entry AlertHistoryEntry) error {
 // GetAlertHistory returns alert history with optional filters.
 // If typeID is 0, returns all alerts. Limit controls max results (0 = unlimited).
 func (d *DB) GetAlertHistory(typeID int32, limit int) ([]AlertHistoryEntry, error) {
+	return d.GetAlertHistoryPage(typeID, limit, 0)
+}
+
+// GetAlertHistoryPage returns alert history with optional limit/offset pagination.
+// If typeID is 0, returns all alerts. Limit 0 means unlimited.
+func (d *DB) GetAlertHistoryPage(typeID int32, limit int, offset int) ([]AlertHistoryEntry, error) {
+	if limit < 0 {
+		limit = 0
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	query := `
 		SELECT id, watchlist_type_id, type_name, alert_metric, alert_threshold,
 		       current_value, message, channels_sent, channels_failed, sent_at, scan_id
@@ -69,6 +82,13 @@ func (d *DB) GetAlertHistory(typeID int32, limit int) ([]AlertHistoryEntry, erro
 	if limit > 0 {
 		query += " LIMIT ?"
 		args = append(args, limit)
+	}
+	if offset > 0 {
+		if limit == 0 {
+			query += " LIMIT -1"
+		}
+		query += " OFFSET ?"
+		args = append(args, offset)
 	}
 
 	rows, err := d.sql.Query(query, args...)

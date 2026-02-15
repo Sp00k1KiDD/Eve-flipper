@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -176,7 +178,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/config", s.handleSetConfig)
 	mux.HandleFunc("POST /api/alerts/test", s.handleAlertsTest)
-	mux.HandleFunc("POST /api/alerts/notify", s.handleAlertsNotify)
 	mux.HandleFunc("GET /api/systems/autocomplete", s.handleAutocomplete)
 	mux.HandleFunc("GET /api/regions/autocomplete", s.handleRegionAutocomplete)
 	mux.HandleFunc("POST /api/scan", s.handleScan)
@@ -211,6 +212,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/ui/open-market", s.handleUIOpenMarket)
 	mux.HandleFunc("POST /api/ui/set-waypoint", s.handleUISetWaypoint)
 	mux.HandleFunc("POST /api/ui/open-contract", s.handleUIOpenContract)
+	// Contracts
+	mux.HandleFunc("GET /api/contracts/{contract_id}/items", s.handleGetContractItems)
 	// Industry
 	mux.HandleFunc("POST /api/industry/analyze", s.handleIndustryAnalyze)
 	mux.HandleFunc("GET /api/industry/search", s.handleIndustrySearch)
@@ -240,15 +243,60 @@ func (s *Server) Handler() http.Handler {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		allowedOrigin := ""
+		if origin != "" && isAllowedCORSOrigin(origin, r.Host) {
+			allowedOrigin = origin
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+			w.Header().Set("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == "OPTIONS" {
-			w.WriteHeader(204)
+			if origin != "" && allowedOrigin == "" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isAllowedCORSOrigin(origin, requestHost string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	originHost := normalizeHost(u.Host)
+	reqHost := normalizeHost(requestHost)
+	if originHost == "" || reqHost == "" {
+		return false
+	}
+	if originHost == reqHost {
+		return true
+	}
+	return isLoopbackHost(originHost) && isLoopbackHost(reqHost)
+}
+
+func normalizeHost(hostPort string) string {
+	if hostPort == "" {
+		return ""
+	}
+	u, err := url.Parse("http://" + hostPort)
+	if err != nil {
+		return strings.ToLower(strings.Trim(hostPort, "[]"))
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
@@ -605,26 +653,6 @@ func (s *Server) handleAlertsTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-func (s *Server) handleAlertsNotify(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, 400, "invalid json")
-		return
-	}
-	msg := strings.TrimSpace(req.Message)
-	if msg == "" {
-		writeError(w, 400, "message is required")
-		return
-	}
-	if len(msg) > 500 {
-		msg = msg[:500]
-	}
-	res := s.sendConfiguredExternalAlerts(msg)
-	writeJSON(w, res)
-}
-
 func (s *Server) sendConfiguredExternalAlerts(message string) alertSendResult {
 	out := alertSendResult{
 		Sent:   []string{},
@@ -803,6 +831,7 @@ type scanRequest struct {
 	ContractInstantLiquidation bool    `json:"contract_instant_liquidation"`
 	ContractHoldDays           int     `json:"contract_hold_days"`
 	ContractTargetConfidence   float64 `json:"contract_target_confidence"`
+	ExcludeRigsWithShip        bool    `json:"exclude_rigs_with_ship"`
 	// Player structures
 	IncludeStructures bool `json:"include_structures"`
 }
@@ -851,6 +880,7 @@ func (s *Server) parseScanParams(req scanRequest) (engine.ScanParams, error) {
 		ContractInstantLiquidation: req.ContractInstantLiquidation,
 		ContractHoldDays:           req.ContractHoldDays,
 		ContractTargetConfidence:   req.ContractTargetConfidence,
+		ExcludeRigsWithShip:        req.ExcludeRigsWithShip,
 	}, nil
 }
 
@@ -918,6 +948,11 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 	scanID := s.db.InsertHistoryFull("radius", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertFlipResults(scanID, results)
+	var scanIDPtr *int64
+	if scanID > 0 {
+		scanIDPtr = &scanID
+	}
+	go s.processWatchlistAlerts(results, scanIDPtr)
 
 	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results), "scan_id": scanID})
 	if marshalErr != nil {
@@ -995,6 +1030,11 @@ func (s *Server) handleScanMultiRegion(w http.ResponseWriter, r *http.Request) {
 	}
 	scanID := s.db.InsertHistoryFull("region", req.SystemName, len(results), topProfit, totalProfit, durationMs, req)
 	go s.db.InsertFlipResults(scanID, results)
+	var scanIDPtr *int64
+	if scanID > 0 {
+		scanIDPtr = &scanID
+	}
+	go s.processWatchlistAlerts(results, scanIDPtr)
 
 	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": results, "count": len(results), "scan_id": scanID})
 	if marshalErr != nil {
@@ -1318,7 +1358,19 @@ func (s *Server) handleGetAlertHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	history, err := s.db.GetAlertHistory(typeID, limit)
+	// Optional offset
+	offsetStr := r.URL.Query().Get("offset")
+	offset := 0
+	if offsetStr != "" {
+		o, err := strconv.Atoi(offsetStr)
+		if err != nil || o < 0 {
+			writeError(w, 400, "invalid offset")
+			return
+		}
+		offset = o
+	}
+
+	history, err := s.db.GetAlertHistoryPage(typeID, limit, offset)
 	if err != nil {
 		log.Printf("[API] Failed to get alert history: %v", err)
 		writeError(w, 500, "failed to retrieve alert history")
@@ -1516,6 +1568,11 @@ func (s *Server) handleScanStation(w http.ResponseWriter, r *http.Request) {
 	if scanID > 0 {
 		go s.db.InsertStationResults(scanID, allResults)
 	}
+	var scanIDPtr *int64
+	if scanID > 0 {
+		scanIDPtr = &scanID
+	}
+	go s.processWatchlistAlerts(allResults, scanIDPtr)
 
 	line, marshalErr := json.Marshal(map[string]interface{}{"type": "result", "data": allResults, "count": len(allResults), "scan_id": scanID})
 	if marshalErr != nil {
@@ -2262,7 +2319,7 @@ func (s *Server) handleAuthOrderDesk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(orders) == 0 {
-		writeJSON(w, engine.ComputeOrderDesk(nil, nil, nil, engine.OrderDeskOptions{
+		writeJSON(w, engine.ComputeOrderDesk(nil, nil, nil, nil, engine.OrderDeskOptions{
 			SalesTaxPercent:  salesTax,
 			BrokerFeePercent: brokerFee,
 			TargetETADays:    targetETADays,
@@ -2343,13 +2400,16 @@ func (s *Server) handleAuthOrderDesk(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	var allRegional []esi.MarketOrder
-	for _, fr := range books {
+	unavailableBooks := make(map[engine.OrderDeskHistoryKey]bool)
+	for rt, fr := range books {
 		if fr.err == nil {
 			allRegional = append(allRegional, fr.orders...)
+			continue
 		}
+		unavailableBooks[engine.NewOrderDeskHistoryKey(rt.regionID, rt.typeID)] = true
 	}
 
-	result := engine.ComputeOrderDesk(orders, allRegional, history, engine.OrderDeskOptions{
+	result := engine.ComputeOrderDesk(orders, allRegional, history, unavailableBooks, engine.OrderDeskOptions{
 		SalesTaxPercent:  salesTax,
 		BrokerFeePercent: brokerFee,
 		TargetETADays:    targetETADays,

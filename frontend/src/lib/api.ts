@@ -1,4 +1,4 @@
-import type { AlertHistoryEntry, AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, OrderDeskResponse, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationsResponse, StationTrade, UndercutStatus, WatchlistItem } from "./types";
+import type { AlertHistoryEntry, AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractDetails, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, OrderDeskResponse, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationsResponse, StationTrade, UndercutStatus, WatchlistItem } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL || "";
 
@@ -105,15 +105,6 @@ export async function updateConfig(patch: Partial<AppConfig>): Promise<AppConfig
     body: JSON.stringify(patch),
   });
   return handleResponse<AppConfig>(res);
-}
-
-export async function sendAlertNotification(message: string): Promise<{ sent: string[]; failed?: Record<string, string> }> {
-  const res = await fetch(`${BASE}/api/alerts/notify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
-  });
-  return handleResponse<{ sent: string[]; failed?: Record<string, string> }>(res);
 }
 
 export async function testAlertChannels(message?: string): Promise<{ sent: string[]; failed?: Record<string, string> }> {
@@ -234,10 +225,11 @@ export async function updateWatchlistItem(typeId: number, patch: {
   return handleResponse<WatchlistItem[]>(res);
 }
 
-export async function getAlertHistory(typeId?: number, limit?: number): Promise<AlertHistoryEntry[]> {
+export async function getAlertHistory(typeId?: number, limit?: number, offset?: number): Promise<AlertHistoryEntry[]> {
   const params = new URLSearchParams();
   if (typeId) params.set("type_id", String(typeId));
   if (limit) params.set("limit", String(limit));
+  if (offset && offset > 0) params.set("offset", String(offset));
   const query = params.toString();
   const res = await fetch(`${BASE}/api/alerts/history${query ? `?${query}` : ""}`);
   return handleResponse<AlertHistoryEntry[]>(res);
@@ -686,4 +678,12 @@ export async function openContractInGame(contractID: number): Promise<void> {
     const err = await res.json().catch(() => ({ error: "Unknown error" }));
     throw new Error(err.error || "Failed to open contract window");
   }
+}
+
+export async function getContractDetails(contractID: number): Promise<ContractDetails> {
+  const res = await fetch(`${BASE}/api/contracts/${contractID}/items`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch contract details");
+  }
+  return res.json();
 }

@@ -38,6 +38,7 @@ export const en = {
     minPricedRatio: "Min Priced Ratio (%)",
     requireHistory: "Require History",
     contractInstantLiquidation: "Instant Liquidation",
+    excludeRigsWithShip: "Exclude Rigs w/ Ship",
     contractHoldDays: "Hold Horizon (days)",
     contractTargetConfidence: "Target Confidence (%)",
     contractFilters: "Contract Filters",
@@ -72,6 +73,7 @@ export const en = {
 
     // Table
     colItem: "Item",
+    colType: "Type",
     colBuyPrice: "Buy ISK",
     colBuyStation: "Buy Station",
     colBuyRegion: "Buy Region",
@@ -417,6 +419,7 @@ export const en = {
     watchlistSearch: "Search...",
     watchlistExported: "Watchlist copied to clipboard",
     watchlistImported: "Imported",
+    watchlistImportInvalid: "Invalid clipboard data",
     watchlistExport: "Export",
     watchlistImport: "Import",
     watchlistDoubleClickHint: "Double-click item to configure alert",
@@ -447,6 +450,9 @@ export const en = {
     watchlistAlertsDisplayed: "alerts displayed",
     watchlistAlertDisplayed: "alert displayed",
     watchlistMostRecent: "showing most recent",
+    watchlistPrevPage: "Prev",
+    watchlistNextPage: "Next",
+    watchlistPage: "Page",
     watchlistViewHistory: "View History",
     watchlistAlertActions: "Actions",
     watchlistAlertSettings: "Alert Settings",
@@ -783,6 +789,9 @@ export const en = {
     orderDeskMedianETA: "Median ETA",
     orderDeskUnknownETA: "unknown ETA",
     orderDeskNotional: "Notional",
+    orderDeskActionHold: "Hold",
+    orderDeskActionReprice: "Reprice",
+    orderDeskActionCancel: "Cancel",
 
     // Portfolio Optimizer
     charOptimizerTab: "Optimizer",
@@ -1184,4 +1193,18 @@ export const en = {
     actionFailed: "Action failed: {error}",
     loginRequired: "Login required for in-game actions",
     reloginRequired: "New permissions added! Please logout and login again via EVE SSO",
+
+    // Contract details popup
+    contractDetails: "Contract Details",
+    contractID: "Contract ID",
+    iskPrice: "ISK Price",
+    contractDetailsWarningTitle: "WARNING",
+    contractDetailsWarningDamage: "Check item damage in-game before buying (damage %)",
+    contractDetailsWarningFitted: "Check if modules/rigs are fitted to ship",
+    itemsIncluded: "Items Included (Seller Provides)",
+    itemsRequested: "Additional Payment Required (Buyer Must Provide)",
+    blueprintCopy: "Blueprint Copy",
+    blueprint: "Blueprint",
+    runs: "runs",
+    close: "Close",
 } as const;

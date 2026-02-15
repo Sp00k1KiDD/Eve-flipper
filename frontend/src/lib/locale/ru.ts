@@ -56,6 +56,7 @@ export const ru = {
     minPricedRatio: "Мин. доля оценки (%)",
     requireHistory: "Требовать историю",
     contractInstantLiquidation: "Мгновенная ликвидация",
+    excludeRigsWithShip: "Исключить риги с кораблем",
     contractHoldDays: "Горизонт (дни)",
     contractTargetConfidence: "Цель уверенности (%)",
     contractFilters: "Фильтры контрактов",
@@ -72,6 +73,7 @@ export const ru = {
 
     // Table
     colItem: "Предмет",
+    colType: "Тип",
     colBuyPrice: "Покупка ISK",
     colBuyStation: "Станция покупки",
     colBuyRegion: "Регион покупки",
@@ -417,6 +419,7 @@ export const ru = {
     watchlistSearch: "Поиск...",
     watchlistExported: "Избранное скопировано в буфер",
     watchlistImported: "Импортировано",
+    watchlistImportInvalid: "Некорректные данные в буфере обмена",
     watchlistExport: "Экспорт",
     watchlistImport: "Импорт",
     watchlistDoubleClickHint: "Двойной клик по предмету для настройки алерта",
@@ -447,6 +450,9 @@ export const ru = {
     watchlistAlertsDisplayed: "уведомлений",
     watchlistAlertDisplayed: "уведомление",
     watchlistMostRecent: "показаны последние",
+    watchlistPrevPage: "Назад",
+    watchlistNextPage: "Вперёд",
+    watchlistPage: "Страница",
     watchlistViewHistory: "Просмотр истории",
     watchlistAlertActions: "Действия",
     watchlistAlertSettings: "Настройки алертов",
@@ -783,6 +789,9 @@ export const ru = {
     orderDeskMedianETA: "Медианная ETA",
     orderDeskUnknownETA: "без ETA",
     orderDeskNotional: "Номинал",
+    orderDeskActionHold: "Держать",
+    orderDeskActionReprice: "Переставить",
+    orderDeskActionCancel: "Снять",
 
     // Portfolio Optimizer
     charOptimizerTab: "Оптимизатор",
@@ -1184,4 +1193,18 @@ export const ru = {
     actionFailed: "Ошибка действия: {error}",
     loginRequired: "Требуется авторизация для действий в игре",
     reloginRequired: "Добавлены новые разрешения! Пожалуйста, выйдите и войдите заново через EVE SSO",
+
+    // Contract details popup
+    contractDetails: "Детали контракта",
+    contractID: "ID контракта",
+    iskPrice: "Цена в ISK",
+    contractDetailsWarningTitle: "ВНИМАНИЕ",
+    contractDetailsWarningDamage: "Проверьте повреждения предметов в игре (damage %)",
+    contractDetailsWarningFitted: "Проверьте установлены ли модули/тюнинг на корабль (fitted items)",
+    itemsIncluded: "Товары в контракте (продавец отдает)",
+    itemsRequested: "Дополнительная оплата (покупатель должен предоставить)",
+    blueprintCopy: "Копия чертежа",
+    blueprint: "Чертеж",
+    runs: "запусков",
+    close: "Закрыть",
 } as const;

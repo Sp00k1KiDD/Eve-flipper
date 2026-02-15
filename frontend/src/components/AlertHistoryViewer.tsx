@@ -16,18 +16,26 @@ export function AlertHistoryViewer({ typeId, typeName, onClose }: Props) {
   const [history, setHistory] = useState<AlertHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const pageSize = 50;
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getAlertHistory(typeId, 100);
+      const data = await getAlertHistory(typeId, pageSize, page * pageSize);
       setHistory(data);
+      setHasMore(data.length === pageSize);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load history");
     } finally {
       setLoading(false);
     }
+  }, [typeId, page, pageSize]);
+
+  useEffect(() => {
+    setPage(0);
   }, [typeId]);
 
   useEffect(() => {
@@ -181,9 +189,27 @@ export function AlertHistoryViewer({ typeId, typeName, onClose }: Props) {
 
         {/* Footer Stats */}
         {!loading && !error && history.length > 0 && (
-          <div className="border-t border-eve-border pt-2 text-xs text-eve-dim text-center">
-            {history.length} {history.length === 1 ? t("watchlistAlertDisplayed") : t("watchlistAlertsDisplayed")}
-            {history.length >= 100 && ` (${t("watchlistMostRecent")} 100)`}
+          <div className="border-t border-eve-border pt-2 text-xs text-eve-dim">
+            <div className="text-center">
+              {history.length} {history.length === 1 ? t("watchlistAlertDisplayed") : t("watchlistAlertsDisplayed")}
+            </div>
+            <div className="mt-2 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={loading || page === 0}
+                className="px-2 py-1 border border-eve-border rounded disabled:opacity-40 hover:border-eve-accent/40 transition-colors"
+              >
+                {t("watchlistPrevPage")}
+              </button>
+              <span>{t("watchlistPage")} {page + 1}</span>
+              <button
+                onClick={() => setPage((p) => p + 1)}
+                disabled={loading || !hasMore}
+                className="px-2 py-1 border border-eve-border rounded disabled:opacity-40 hover:border-eve-accent/40 transition-colors"
+              >
+                {t("watchlistNextPage")}
+              </button>
+            </div>
           </div>
         )}
       </div>
