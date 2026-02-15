@@ -30,7 +30,7 @@ func dbPath() string {
 // Open opens (or creates) the SQLite database and runs migrations.
 func Open() (*DB, error) {
 	path := dbPath()
-	sqlDB, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	sqlDB, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -437,6 +437,64 @@ func (d *DB) migrate() error {
 			return fmt.Errorf("migration v12: %w", err)
 		}
 		logger.Info("DB", "Applied migration v12 (contract_results long-horizon fields)")
+	}
+
+	if version < 13 {
+		watchlistCols := []struct {
+			name string
+			def  string
+		}{
+			{name: "alert_enabled", def: "INTEGER NOT NULL DEFAULT 0"},
+			{name: "alert_metric", def: "TEXT NOT NULL DEFAULT 'margin_percent'"},
+			{name: "alert_threshold", def: "REAL NOT NULL DEFAULT 0"},
+		}
+		for _, c := range watchlistCols {
+			if err := d.ensureTableColumn("watchlist", c.name, c.def); err != nil {
+				return fmt.Errorf("migration v13 add watchlist.%s: %w", c.name, err)
+			}
+		}
+		// Backfill legacy threshold into the new alert model.
+		if _, err := d.sql.Exec(`
+			UPDATE watchlist
+			   SET alert_enabled = CASE WHEN alert_min_margin > 0 THEN 1 ELSE 0 END,
+			       alert_metric = 'margin_percent',
+			       alert_threshold = CASE WHEN alert_min_margin > 0 THEN alert_min_margin ELSE 0 END
+			 WHERE alert_threshold <= 0;
+		`); err != nil {
+			return fmt.Errorf("migration v13 backfill watchlist alerts: %w", err)
+		}
+		if _, err := d.sql.Exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (13);`); err != nil {
+			return fmt.Errorf("migration v13: %w", err)
+		}
+		logger.Info("DB", "Applied migration v13 (watchlist alert model)")
+	}
+
+	if version < 14 {
+		_, err := d.sql.Exec(`
+			CREATE TABLE IF NOT EXISTS alert_history (
+				id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+				watchlist_type_id   INTEGER NOT NULL,
+				type_name           TEXT NOT NULL,
+				alert_metric        TEXT NOT NULL,
+				alert_threshold     REAL NOT NULL,
+				current_value       REAL NOT NULL,
+				message             TEXT NOT NULL,
+				channels_sent       TEXT NOT NULL,
+				channels_failed     TEXT,
+				sent_at             TEXT NOT NULL,
+				scan_id             INTEGER,
+				FOREIGN KEY (watchlist_type_id) REFERENCES watchlist(type_id) ON DELETE CASCADE
+			);
+			CREATE INDEX IF NOT EXISTS idx_alert_history_type ON alert_history(watchlist_type_id, sent_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_alert_history_time ON alert_history(sent_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_alert_history_scan ON alert_history(scan_id);
+
+			INSERT OR IGNORE INTO schema_version (version) VALUES (14);
+		`)
+		if err != nil {
+			return fmt.Errorf("migration v14: %w", err)
+		}
+		logger.Info("DB", "Applied migration v14 (alert history)")
 	}
 
 	return nil

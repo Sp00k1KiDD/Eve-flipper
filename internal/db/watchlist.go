@@ -6,7 +6,11 @@ import (
 
 // GetWatchlist returns all watchlist items.
 func (d *DB) GetWatchlist() []config.WatchlistItem {
-	rows, err := d.sql.Query("SELECT type_id, type_name, added_at, alert_min_margin FROM watchlist ORDER BY added_at DESC")
+	rows, err := d.sql.Query(`
+		SELECT type_id, type_name, added_at, alert_min_margin, alert_enabled, alert_metric, alert_threshold
+		  FROM watchlist
+		 ORDER BY added_at DESC
+	`)
 	if err != nil {
 		return []config.WatchlistItem{}
 	}
@@ -15,7 +19,21 @@ func (d *DB) GetWatchlist() []config.WatchlistItem {
 	var items []config.WatchlistItem
 	for rows.Next() {
 		var item config.WatchlistItem
-		rows.Scan(&item.TypeID, &item.TypeName, &item.AddedAt, &item.AlertMinMargin)
+		rows.Scan(
+			&item.TypeID,
+			&item.TypeName,
+			&item.AddedAt,
+			&item.AlertMinMargin,
+			&item.AlertEnabled,
+			&item.AlertMetric,
+			&item.AlertThreshold,
+		)
+		if item.AlertMetric == "" {
+			item.AlertMetric = "margin_percent"
+		}
+		if item.AlertThreshold <= 0 && item.AlertMinMargin > 0 {
+			item.AlertThreshold = item.AlertMinMargin
+		}
 		items = append(items, item)
 	}
 	if items == nil {
@@ -33,9 +51,31 @@ func (d *DB) HasWatchlistItem(typeID int32) bool {
 
 // AddWatchlistItem inserts a watchlist item. Returns true if inserted, false if duplicate.
 func (d *DB) AddWatchlistItem(item config.WatchlistItem) bool {
+	if item.AlertMetric == "" {
+		item.AlertMetric = "margin_percent"
+	}
+	if item.AlertThreshold <= 0 && item.AlertMinMargin > 0 {
+		item.AlertThreshold = item.AlertMinMargin
+	}
+	if item.AlertThreshold > 0 && !item.AlertEnabled {
+		item.AlertEnabled = true
+	}
+	if item.AlertMetric == "margin_percent" {
+		item.AlertMinMargin = item.AlertThreshold
+	} else if item.AlertMinMargin < 0 {
+		item.AlertMinMargin = 0
+	}
 	res, err := d.sql.Exec(
-		"INSERT OR IGNORE INTO watchlist (type_id, type_name, added_at, alert_min_margin) VALUES (?, ?, ?, ?)",
-		item.TypeID, item.TypeName, item.AddedAt, item.AlertMinMargin,
+		`INSERT OR IGNORE INTO watchlist
+		   (type_id, type_name, added_at, alert_min_margin, alert_enabled, alert_metric, alert_threshold)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		item.TypeID,
+		item.TypeName,
+		item.AddedAt,
+		item.AlertMinMargin,
+		item.AlertEnabled,
+		item.AlertMetric,
+		item.AlertThreshold,
 	)
 	if err != nil {
 		return false
@@ -49,7 +89,27 @@ func (d *DB) DeleteWatchlistItem(typeID int32) {
 	d.sql.Exec("DELETE FROM watchlist WHERE type_id = ?", typeID)
 }
 
-// UpdateWatchlistItem updates the alert threshold for a watchlist item.
-func (d *DB) UpdateWatchlistItem(typeID int32, alertMinMargin float64) {
-	d.sql.Exec("UPDATE watchlist SET alert_min_margin = ? WHERE type_id = ?", alertMinMargin, typeID)
+// UpdateWatchlistItem updates alert settings for a watchlist item.
+func (d *DB) UpdateWatchlistItem(typeID int32, alertMinMargin float64, alertEnabled bool, alertMetric string, alertThreshold float64) {
+	if alertMetric == "" {
+		alertMetric = "margin_percent"
+	}
+	if alertThreshold < 0 {
+		alertThreshold = 0
+	}
+	if alertMetric == "margin_percent" {
+		alertMinMargin = alertThreshold
+	} else if alertMinMargin < 0 {
+		alertMinMargin = 0
+	}
+	d.sql.Exec(
+		`UPDATE watchlist
+		    SET alert_min_margin = ?, alert_enabled = ?, alert_metric = ?, alert_threshold = ?
+		  WHERE type_id = ?`,
+		alertMinMargin,
+		alertEnabled,
+		alertMetric,
+		alertThreshold,
+		typeID,
+	)
 }

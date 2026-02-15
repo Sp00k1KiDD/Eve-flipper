@@ -103,6 +103,23 @@ export interface WatchlistItem {
   type_name: string;
   added_at: string;
   alert_min_margin: number;
+  alert_enabled?: boolean;
+  alert_metric?: "margin_percent" | "total_profit" | "profit_per_unit" | "daily_volume";
+  alert_threshold?: number;
+}
+
+export interface AlertHistoryEntry {
+  id: number;
+  watchlist_type_id: number;
+  type_name: string;
+  alert_metric: string;
+  alert_threshold: number;
+  current_value: number;
+  message: string;
+  channels_sent: string[];
+  channels_failed?: Record<string, string>;
+  sent_at: string;
+  scan_id?: number;
 }
 
 export interface ScanRecord {
@@ -260,6 +277,12 @@ export interface AppConfig {
   sell_radius: number;
   min_margin: number;
   sales_tax_percent: number;
+  alert_telegram: boolean;
+  alert_discord: boolean;
+  alert_desktop: boolean;
+  alert_telegram_token: string;
+  alert_telegram_chat_id: string;
+  alert_discord_webhook: string;
   opacity: number;
   window_x: number;
   window_y: number;
@@ -377,6 +400,64 @@ export interface BookLevel {
   price: number;
   volume: number;
   is_player: boolean;
+}
+
+export interface OrderDeskSummary {
+  total_orders: number;
+  buy_orders: number;
+  sell_orders: number;
+  needs_reprice: number;
+  needs_cancel: number;
+  total_notional: number;
+  median_eta_days: number;
+  avg_eta_days: number;
+  worst_eta_days: number;
+  unknown_eta_count: number;
+}
+
+export interface OrderDeskSettings {
+  sales_tax_percent: number;
+  broker_fee_percent: number;
+  target_eta_days: number;
+  warn_expiry_days: number;
+}
+
+export interface OrderDeskOrder {
+  order_id: number;
+  type_id: number;
+  type_name: string;
+  location_id: number;
+  location_name: string;
+  region_id: number;
+  is_buy_order: boolean;
+  price: number;
+  volume_remain: number;
+  volume_total: number;
+  notional: number;
+  net_unit_isk: number;
+  net_notional: number;
+  position: number;
+  total_orders: number;
+  best_price: number;
+  suggested_price: number;
+  undercut_amount: number;
+  undercut_pct: number;
+  queue_ahead_qty: number;
+  top_price_qty: number;
+  avg_daily_volume: number;
+  estimated_fill_per_day: number;
+  eta_days: number;
+  issued_at: string;
+  expires_at: string;
+  days_to_expire: number;
+  recommendation: "hold" | "reprice" | "cancel" | string;
+  reason: string;
+}
+
+export interface OrderDeskResponse {
+  summary: OrderDeskSummary;
+  orders: OrderDeskOrder[];
+  settings: OrderDeskSettings;
 }
 
 // --- Industry Types ---
@@ -509,6 +590,12 @@ export interface PortfolioPnLStats {
   avg_win: number;
   avg_loss: number;
   expectancy_per_trade: number;
+  realized_trades: number;
+  realized_quantity: number;
+  open_positions: number;
+  open_cost_basis: number;
+  total_fees: number;
+  total_taxes: number;
 }
 
 export interface StationPnL {
@@ -534,11 +621,72 @@ export interface ItemPnL {
   transactions: number;
 }
 
+export interface RealizedTrade {
+  type_id: number;
+  type_name: string;
+  quantity: number;
+  buy_transaction_id: number;
+  sell_transaction_id: number;
+  buy_date: string;
+  sell_date: string;
+  holding_days: number;
+  buy_location_id: number;
+  buy_location_name: string;
+  sell_location_id: number;
+  sell_location_name: string;
+  buy_unit_price: number;
+  sell_unit_price: number;
+  buy_gross: number;
+  sell_gross: number;
+  buy_fee: number;
+  sell_broker_fee: number;
+  sell_tax: number;
+  buy_total: number;
+  sell_total: number;
+  realized_pnl: number;
+  margin_percent: number;
+  unmatched?: boolean;
+}
+
+export interface OpenPosition {
+  type_id: number;
+  type_name: string;
+  location_id: number;
+  location_name: string;
+  quantity: number;
+  avg_cost: number;
+  cost_basis: number;
+  oldest_lot_date: string;
+}
+
+export interface MatchingCoverage {
+  total_sell_qty: number;
+  matched_sell_qty: number;
+  unmatched_sell_qty: number;
+  total_sell_value: number;
+  matched_sell_value: number;
+  unmatched_sell_value: number;
+  match_rate_qty_pct: number;
+  match_rate_value_pct: number;
+}
+
+export interface PortfolioSettings {
+  lookback_days: number;
+  sales_tax_percent: number;
+  broker_fee_percent: number;
+  ledger_limit: number;
+  include_unmatched_sell: boolean;
+}
+
 export interface PortfolioPnL {
   daily_pnl: DailyPnLEntry[];
   summary: PortfolioPnLStats;
   top_items: ItemPnL[];
   top_stations: StationPnL[];
+  ledger: RealizedTrade[];
+  open_positions: OpenPosition[];
+  coverage: MatchingCoverage;
+  settings: PortfolioSettings;
 }
 
 // --- Portfolio Optimizer Types ---

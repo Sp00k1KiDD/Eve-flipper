@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -173,6 +175,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("POST /api/config", s.handleSetConfig)
+	mux.HandleFunc("POST /api/alerts/test", s.handleAlertsTest)
+	mux.HandleFunc("POST /api/alerts/notify", s.handleAlertsNotify)
 	mux.HandleFunc("GET /api/systems/autocomplete", s.handleAutocomplete)
 	mux.HandleFunc("GET /api/regions/autocomplete", s.handleRegionAutocomplete)
 	mux.HandleFunc("POST /api/scan", s.handleScan)
@@ -183,6 +187,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/watchlist", s.handleAddWatchlist)
 	mux.HandleFunc("DELETE /api/watchlist/{typeID}", s.handleDeleteWatchlist)
 	mux.HandleFunc("PUT /api/watchlist/{typeID}", s.handleUpdateWatchlist)
+	mux.HandleFunc("GET /api/alerts/history", s.handleGetAlertHistory)
 	mux.HandleFunc("POST /api/scan/station", s.handleScanStation)
 	mux.HandleFunc("GET /api/stations", s.handleGetStations)
 	mux.HandleFunc("GET /api/scan/history", s.handleGetHistory)
@@ -198,6 +203,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/character", s.handleAuthCharacter)
 	mux.HandleFunc("GET /api/auth/location", s.handleAuthLocation)
 	mux.HandleFunc("GET /api/auth/undercuts", s.handleAuthUndercuts)
+	mux.HandleFunc("GET /api/auth/orders/desk", s.handleAuthOrderDesk)
 	mux.HandleFunc("GET /api/auth/portfolio", s.handleAuthPortfolio)
 	mux.HandleFunc("GET /api/auth/portfolio/optimize", s.handleAuthPortfolioOptimize)
 	mux.HandleFunc("GET /api/auth/structures", s.handleAuthStructures)
@@ -510,6 +516,24 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	if v, ok := patch["sales_tax_percent"]; ok {
 		json.Unmarshal(v, &s.cfg.SalesTaxPercent)
 	}
+	if v, ok := patch["alert_telegram"]; ok {
+		json.Unmarshal(v, &s.cfg.AlertTelegram)
+	}
+	if v, ok := patch["alert_discord"]; ok {
+		json.Unmarshal(v, &s.cfg.AlertDiscord)
+	}
+	if v, ok := patch["alert_desktop"]; ok {
+		json.Unmarshal(v, &s.cfg.AlertDesktop)
+	}
+	if v, ok := patch["alert_telegram_token"]; ok {
+		json.Unmarshal(v, &s.cfg.AlertTelegramToken)
+	}
+	if v, ok := patch["alert_telegram_chat_id"]; ok {
+		json.Unmarshal(v, &s.cfg.AlertTelegramChatID)
+	}
+	if v, ok := patch["alert_discord_webhook"]; ok {
+		json.Unmarshal(v, &s.cfg.AlertDiscordWebhook)
+	}
 	if v, ok := patch["opacity"]; ok {
 		json.Unmarshal(v, &s.cfg.Opacity)
 	}
@@ -543,9 +567,142 @@ func (s *Server) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	} else if s.cfg.Opacity > 100 {
 		s.cfg.Opacity = 100
 	}
+	// Keep at least one alert channel enabled.
+	if !s.cfg.AlertTelegram && !s.cfg.AlertDiscord && !s.cfg.AlertDesktop {
+		s.cfg.AlertDesktop = true
+	}
 
 	s.db.SaveConfig(s.cfg)
 	writeJSON(w, s.cfg)
+}
+
+type alertSendResult struct {
+	Sent   []string          `json:"sent"`
+	Failed map[string]string `json:"failed,omitempty"`
+}
+
+func (s *Server) handleAlertsTest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, 400, "invalid json")
+		return
+	}
+	msg := strings.TrimSpace(req.Message)
+	if msg == "" {
+		msg = fmt.Sprintf("EVE Flipper test alert (%s)", time.Now().Format(time.RFC3339))
+	}
+	if len(msg) > 500 {
+		msg = msg[:500]
+	}
+
+	res := s.sendConfiguredExternalAlerts(msg)
+	writeJSON(w, res)
+}
+
+func (s *Server) handleAlertsNotify(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 400, "invalid json")
+		return
+	}
+	msg := strings.TrimSpace(req.Message)
+	if msg == "" {
+		writeError(w, 400, "message is required")
+		return
+	}
+	if len(msg) > 500 {
+		msg = msg[:500]
+	}
+	res := s.sendConfiguredExternalAlerts(msg)
+	writeJSON(w, res)
+}
+
+func (s *Server) sendConfiguredExternalAlerts(message string) alertSendResult {
+	out := alertSendResult{
+		Sent:   []string{},
+		Failed: map[string]string{},
+	}
+	if s.cfg == nil {
+		out.Failed["config"] = "config is not loaded"
+		return out
+	}
+
+	if s.cfg.AlertTelegram {
+		if strings.TrimSpace(s.cfg.AlertTelegramToken) == "" || strings.TrimSpace(s.cfg.AlertTelegramChatID) == "" {
+			out.Failed["telegram"] = "telegram token/chat_id not configured"
+		} else if err := sendTelegramAlert(s.cfg.AlertTelegramToken, s.cfg.AlertTelegramChatID, message); err != nil {
+			out.Failed["telegram"] = err.Error()
+		} else {
+			out.Sent = append(out.Sent, "telegram")
+		}
+	}
+	if s.cfg.AlertDiscord {
+		if strings.TrimSpace(s.cfg.AlertDiscordWebhook) == "" {
+			out.Failed["discord"] = "discord webhook not configured"
+		} else if err := sendDiscordAlert(s.cfg.AlertDiscordWebhook, message); err != nil {
+			out.Failed["discord"] = err.Error()
+		} else {
+			out.Sent = append(out.Sent, "discord")
+		}
+	}
+	if len(out.Failed) == 0 {
+		out.Failed = nil
+	}
+	return out
+}
+
+func sendTelegramAlert(token, chatID, message string) error {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", strings.TrimSpace(token))
+	body, _ := json.Marshal(map[string]any{
+		"chat_id":                  strings.TrimSpace(chatID),
+		"text":                     message,
+		"disable_web_page_preview": true,
+	})
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("telegram http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
+func sendDiscordAlert(webhookURL, message string) error {
+	body, _ := json.Marshal(map[string]any{
+		"content": message,
+	})
+	req, err := http.NewRequest(http.MethodPost, strings.TrimSpace(webhookURL), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// Discord webhook usually returns 204 No Content.
+	if resp.StatusCode != http.StatusNoContent && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("discord http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
 }
 
 func (s *Server) handleAutocomplete(w http.ResponseWriter, r *http.Request) {
@@ -1048,6 +1205,16 @@ func (s *Server) handleAddWatchlist(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if item.AlertMetric == "" {
+		item.AlertMetric = "margin_percent"
+	}
+	if item.AlertThreshold <= 0 && item.AlertMinMargin > 0 {
+		item.AlertThreshold = item.AlertMinMargin
+	}
+	if item.AlertThreshold > 0 && !item.AlertEnabled {
+		item.AlertEnabled = true
+	}
+
 	item.AddedAt = time.Now().Format(time.RFC3339)
 	inserted := s.db.AddWatchlistItem(item)
 
@@ -1081,13 +1248,80 @@ func (s *Server) handleUpdateWatchlist(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		AlertMinMargin float64 `json:"alert_min_margin"`
+		AlertEnabled   bool    `json:"alert_enabled"`
+		AlertMetric    string  `json:"alert_metric"`
+		AlertThreshold float64 `json:"alert_threshold"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, 400, "invalid json")
 		return
 	}
-	s.db.UpdateWatchlistItem(int32(id), body.AlertMinMargin)
+
+	switch body.AlertMetric {
+	case "", "margin_percent", "total_profit", "profit_per_unit", "daily_volume":
+		// ok
+	default:
+		writeError(w, 400, "invalid alert_metric")
+		return
+	}
+	if body.AlertThreshold < 0 {
+		writeError(w, 400, "alert_threshold must be >= 0")
+		return
+	}
+
+	alertMetric := body.AlertMetric
+	if alertMetric == "" {
+		alertMetric = "margin_percent"
+	}
+	alertThreshold := body.AlertThreshold
+	alertEnabled := body.AlertEnabled
+
+	// Backward-compatible behavior for old clients sending only alert_min_margin.
+	if alertThreshold <= 0 && body.AlertMinMargin > 0 {
+		alertMetric = "margin_percent"
+		alertThreshold = body.AlertMinMargin
+		alertEnabled = true
+	}
+
+	s.db.UpdateWatchlistItem(int32(id), body.AlertMinMargin, alertEnabled, alertMetric, alertThreshold)
 	writeJSON(w, s.db.GetWatchlist())
+}
+
+func (s *Server) handleGetAlertHistory(w http.ResponseWriter, r *http.Request) {
+	// Optional filter by type_id
+	typeIDStr := r.URL.Query().Get("type_id")
+	var typeID int32
+	if typeIDStr != "" {
+		id, err := strconv.Atoi(typeIDStr)
+		if err != nil {
+			writeError(w, 400, "invalid type_id")
+			return
+		}
+		typeID = int32(id)
+	}
+
+	// Optional limit
+	limitStr := r.URL.Query().Get("limit")
+	limit := 100 // default
+	if limitStr != "" {
+		l, err := strconv.Atoi(limitStr)
+		if err != nil || l < 0 {
+			writeError(w, 400, "invalid limit")
+			return
+		}
+		if l > 0 {
+			limit = l
+		}
+	}
+
+	history, err := s.db.GetAlertHistory(typeID, limit)
+	if err != nil {
+		log.Printf("[API] Failed to get alert history: %v", err)
+		writeError(w, 500, "failed to retrieve alert history")
+		return
+	}
+
+	writeJSON(w, history)
 }
 
 // --- Station Trading ---
@@ -1984,6 +2218,142 @@ func (s *Server) handleAuthUndercuts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, undercuts)
 }
 
+func (s *Server) handleAuthOrderDesk(w http.ResponseWriter, r *http.Request) {
+	token, err := s.sessions.EnsureValidToken(s.sso)
+	if err != nil {
+		writeError(w, 401, err.Error())
+		return
+	}
+	sess := s.sessions.Get()
+	if sess == nil {
+		writeError(w, 401, "not logged in")
+		return
+	}
+
+	salesTax := 8.0
+	if s.cfg != nil {
+		salesTax = s.cfg.SalesTaxPercent
+	}
+	if v := r.URL.Query().Get("sales_tax"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 100 {
+			salesTax = f
+		}
+	}
+	brokerFee := 1.0
+	if v := r.URL.Query().Get("broker_fee"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 100 {
+			brokerFee = f
+		}
+	}
+	targetETADays := 3.0
+	if v := r.URL.Query().Get("target_eta_days"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 60 {
+			targetETADays = f
+		}
+	}
+
+	orders, err := s.esi.GetCharacterOrders(sess.CharacterID, token)
+	if err != nil {
+		writeError(w, 500, "failed to fetch orders: "+err.Error())
+		return
+	}
+	if len(orders) == 0 {
+		writeJSON(w, engine.ComputeOrderDesk(nil, nil, nil, engine.OrderDeskOptions{
+			SalesTaxPercent:  salesTax,
+			BrokerFeePercent: brokerFee,
+			TargetETADays:    targetETADays,
+			WarnExpiryDays:   2,
+		}))
+		return
+	}
+
+	// Enrich names for UI readability.
+	s.mu.RLock()
+	sdeData := s.sdeData
+	s.mu.RUnlock()
+	if sdeData != nil {
+		locationIDs := make(map[int64]bool, len(orders))
+		for _, o := range orders {
+			locationIDs[o.LocationID] = true
+		}
+		s.esi.PrefetchStationNames(locationIDs)
+		for i := range orders {
+			if t, ok := sdeData.Types[orders[i].TypeID]; ok {
+				orders[i].TypeName = t.Name
+			}
+			orders[i].LocationName = s.esi.StationName(orders[i].LocationID)
+		}
+	}
+
+	type regionType struct {
+		regionID int32
+		typeID   int32
+	}
+	pairs := make(map[regionType]bool)
+	for _, o := range orders {
+		pairs[regionType{regionID: o.RegionID, typeID: o.TypeID}] = true
+	}
+
+	type fetchResult struct {
+		orders []esi.MarketOrder
+		err    error
+	}
+	books := make(map[regionType]fetchResult)
+	history := make(map[engine.OrderDeskHistoryKey][]esi.HistoryEntry)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10)
+
+	for pair := range pairs {
+		wg.Add(1)
+		go func(rt regionType) {
+			defer wg.Done()
+
+			sem <- struct{}{}
+			ro, fetchErr := s.esi.FetchRegionOrdersByType(rt.regionID, rt.typeID)
+			<-sem
+
+			var entries []esi.HistoryEntry
+			var ok bool
+			if s.db != nil {
+				entries, ok = s.db.GetMarketHistory(rt.regionID, rt.typeID)
+			}
+			if !ok {
+				fresh, histErr := s.esi.FetchMarketHistory(rt.regionID, rt.typeID)
+				if histErr == nil {
+					entries = fresh
+					if s.db != nil && len(entries) > 0 {
+						s.db.SetMarketHistory(rt.regionID, rt.typeID, entries)
+					}
+				}
+			}
+
+			mu.Lock()
+			books[rt] = fetchResult{orders: ro, err: fetchErr}
+			if len(entries) > 0 {
+				history[engine.NewOrderDeskHistoryKey(rt.regionID, rt.typeID)] = entries
+			}
+			mu.Unlock()
+		}(pair)
+	}
+	wg.Wait()
+
+	var allRegional []esi.MarketOrder
+	for _, fr := range books {
+		if fr.err == nil {
+			allRegional = append(allRegional, fr.orders...)
+		}
+	}
+
+	result := engine.ComputeOrderDesk(orders, allRegional, history, engine.OrderDeskOptions{
+		SalesTaxPercent:  salesTax,
+		BrokerFeePercent: brokerFee,
+		TargetETADays:    targetETADays,
+		WarnExpiryDays:   2,
+	})
+	writeJSON(w, result)
+}
+
 func (s *Server) handleAuthPortfolio(w http.ResponseWriter, r *http.Request) {
 	token, err := s.sessions.EnsureValidToken(s.sso)
 	if err != nil {
@@ -2001,6 +2371,27 @@ func (s *Server) handleAuthPortfolio(w http.ResponseWriter, r *http.Request) {
 	if daysStr != "" {
 		if d, err := strconv.Atoi(daysStr); err == nil && d > 0 && d <= 365 {
 			days = d
+		}
+	}
+	salesTax := 8.0
+	if s.cfg != nil {
+		salesTax = s.cfg.SalesTaxPercent
+	}
+	if v := r.URL.Query().Get("sales_tax"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 100 {
+			salesTax = f
+		}
+	}
+	brokerFee := 1.0
+	if v := r.URL.Query().Get("broker_fee"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 100 {
+			brokerFee = f
+		}
+	}
+	ledgerLimit := 500
+	if v := r.URL.Query().Get("ledger_limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 && n <= 5000 {
+			ledgerLimit = n
 		}
 	}
 
@@ -2033,7 +2424,13 @@ func (s *Server) handleAuthPortfolio(w http.ResponseWriter, r *http.Request) {
 		txns = freshTxns
 	}
 
-	result := engine.ComputePortfolioPnL(txns, days)
+	result := engine.ComputePortfolioPnLWithOptions(txns, engine.PortfolioPnLOptions{
+		LookbackDays:         days,
+		SalesTaxPercent:      salesTax,
+		BrokerFeePercent:     brokerFee,
+		LedgerLimit:          ledgerLimit,
+		IncludeUnmatchedSell: false, // strict realized mode for API
+	})
 	writeJSON(w, result)
 }
 

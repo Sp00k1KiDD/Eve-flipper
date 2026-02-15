@@ -1,4 +1,4 @@
-import type { AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationsResponse, StationTrade, UndercutStatus, WatchlistItem } from "./types";
+import type { AlertHistoryEntry, AppConfig, AppStatus, AuthStatus, CharacterInfo, CharacterRoles, ContractResult, CorpDashboard, CorpIndustryJob, CorpJournalEntry, CorpMarketOrderDetail, CorpMember, CorpMiningEntry, DemandRegionResponse, DemandRegionsResponse, ExecutionPlanResult, FlipResult, HotZonesResponse, OptimizerDiagnostic, OrderDeskResponse, PLEXDashboard, PortfolioPnL, PortfolioOptimization, RegionOpportunities, RouteResult, ScanParams, ScanRecord, StationInfo, StationsResponse, StationTrade, UndercutStatus, WatchlistItem } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL || "";
 
@@ -107,6 +107,24 @@ export async function updateConfig(patch: Partial<AppConfig>): Promise<AppConfig
   return handleResponse<AppConfig>(res);
 }
 
+export async function sendAlertNotification(message: string): Promise<{ sent: string[]; failed?: Record<string, string> }> {
+  const res = await fetch(`${BASE}/api/alerts/notify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  return handleResponse<{ sent: string[]; failed?: Record<string, string> }>(res);
+}
+
+export async function testAlertChannels(message?: string): Promise<{ sent: string[]; failed?: Record<string, string> }> {
+  const res = await fetch(`${BASE}/api/alerts/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: message ?? "" }),
+  });
+  return handleResponse<{ sent: string[]; failed?: Record<string, string> }>(res);
+}
+
 export async function autocomplete(query: string): Promise<string[]> {
   const res = await fetch(`${BASE}/api/systems/autocomplete?q=${encodeURIComponent(query)}`);
   const data = await handleResponse<{ systems?: string[] }>(res);
@@ -185,7 +203,14 @@ export async function addToWatchlist(typeId: number, typeName: string, alertMinM
   const res = await fetch(`${BASE}/api/watchlist`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type_id: typeId, type_name: typeName, alert_min_margin: alertMinMargin }),
+    body: JSON.stringify({
+      type_id: typeId,
+      type_name: typeName,
+      alert_min_margin: alertMinMargin,
+      alert_enabled: alertMinMargin > 0,
+      alert_metric: "margin_percent",
+      alert_threshold: alertMinMargin,
+    }),
   });
   return handleResponse<AddWatchlistResult>(res);
 }
@@ -195,13 +220,27 @@ export async function removeFromWatchlist(typeId: number): Promise<WatchlistItem
   return handleResponse<WatchlistItem[]>(res);
 }
 
-export async function updateWatchlistItem(typeId: number, alertMinMargin: number): Promise<WatchlistItem[]> {
+export async function updateWatchlistItem(typeId: number, patch: {
+  alert_min_margin?: number;
+  alert_enabled?: boolean;
+  alert_metric?: "margin_percent" | "total_profit" | "profit_per_unit" | "daily_volume";
+  alert_threshold?: number;
+}): Promise<WatchlistItem[]> {
   const res = await fetch(`${BASE}/api/watchlist/${typeId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ alert_min_margin: alertMinMargin }),
+    body: JSON.stringify(patch),
   });
   return handleResponse<WatchlistItem[]>(res);
+}
+
+export async function getAlertHistory(typeId?: number, limit?: number): Promise<AlertHistoryEntry[]> {
+  const params = new URLSearchParams();
+  if (typeId) params.set("type_id", String(typeId));
+  if (limit) params.set("limit", String(limit));
+  const query = params.toString();
+  const res = await fetch(`${BASE}/api/alerts/history${query ? `?${query}` : ""}`);
+  return handleResponse<AlertHistoryEntry[]>(res);
 }
 
 // --- Station Trading ---
@@ -345,8 +384,35 @@ export async function getUndercuts(): Promise<UndercutStatus[]> {
   return handleResponse<UndercutStatus[]>(res);
 }
 
-export async function getPortfolioPnL(days: number = 30): Promise<PortfolioPnL> {
-  const res = await fetch(`${BASE}/api/auth/portfolio?days=${days}`);
+export interface OrderDeskParams {
+  salesTax?: number;
+  brokerFee?: number;
+  targetEtaDays?: number;
+}
+
+export async function getOrderDesk(params?: OrderDeskParams): Promise<OrderDeskResponse> {
+  const qp = new URLSearchParams();
+  if (params?.salesTax != null) qp.set("sales_tax", String(params.salesTax));
+  if (params?.brokerFee != null) qp.set("broker_fee", String(params.brokerFee));
+  if (params?.targetEtaDays != null) qp.set("target_eta_days", String(params.targetEtaDays));
+  const qs = qp.toString();
+  const res = await fetch(`${BASE}/api/auth/orders/desk${qs ? `?${qs}` : ""}`);
+  return handleResponse<OrderDeskResponse>(res);
+}
+
+export interface PortfolioPnLParams {
+  salesTax?: number;
+  brokerFee?: number;
+  ledgerLimit?: number;
+}
+
+export async function getPortfolioPnL(days: number = 30, params?: PortfolioPnLParams): Promise<PortfolioPnL> {
+  const qp = new URLSearchParams();
+  qp.set("days", String(days));
+  if (params?.salesTax != null) qp.set("sales_tax", String(params.salesTax));
+  if (params?.brokerFee != null) qp.set("broker_fee", String(params.brokerFee));
+  if (params?.ledgerLimit != null) qp.set("ledger_limit", String(params.ledgerLimit));
+  const res = await fetch(`${BASE}/api/auth/portfolio?${qp.toString()}`);
   return handleResponse<PortfolioPnL>(res);
 }
 

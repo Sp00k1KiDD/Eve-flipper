@@ -1,19 +1,36 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FlipResult, WatchlistItem } from "@/lib/types";
 import {
+  addToWatchlist,
   getWatchlist,
   removeFromWatchlist,
   updateWatchlistItem,
-  addToWatchlist,
 } from "@/lib/api";
 import { formatISK, formatMargin } from "@/lib/format";
 import { useI18n, type TranslationKey } from "@/lib/i18n";
 import { useGlobalToast } from "./Toast";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { Modal } from "./Modal";
+import { AlertHistoryViewer } from "./AlertHistoryViewer";
+
+type AlertChannels = {
+  telegram: boolean;
+  discord: boolean;
+  desktop: boolean;
+};
 
 interface Props {
-  /** Latest scan results (from radius or region tab) to cross-reference prices */
   latestResults: FlipResult[];
+  alertChannels: AlertChannels;
+  toggleAlertChannel: (channel: keyof AlertChannels) => void;
+  alertTelegramToken: string;
+  setAlertTelegramToken: (val: string) => void;
+  alertTelegramChatID: string;
+  setAlertTelegramChatID: (val: string) => void;
+  alertDiscordWebhook: string;
+  setAlertDiscordWebhook: (val: string) => void;
+  handleTestAlert: () => void;
+  alertTestLoading: boolean;
 }
 
 type SortKey =
@@ -25,13 +42,85 @@ type SortKey =
   | "sell"
   | "added_at";
 type SortDir = "asc" | "desc";
+type AlertMetric =
+  | "margin_percent"
+  | "total_profit"
+  | "profit_per_unit"
+  | "daily_volume";
 
-export function WatchlistTab({ latestResults }: Props) {
+function getAlertMetric(item: WatchlistItem): AlertMetric {
+  const metric = item.alert_metric;
+  if (
+    metric === "margin_percent" ||
+    metric === "total_profit" ||
+    metric === "profit_per_unit" ||
+    metric === "daily_volume"
+  ) {
+    return metric;
+  }
+  return "margin_percent";
+}
+
+function getAlertThreshold(item: WatchlistItem): number {
+  if ((item.alert_threshold ?? 0) > 0) {
+    return item.alert_threshold ?? 0;
+  }
+  return item.alert_min_margin ?? 0;
+}
+
+function isAlertEnabled(item: WatchlistItem): boolean {
+  if (typeof item.alert_enabled === "boolean") {
+    return item.alert_enabled;
+  }
+  return getAlertThreshold(item) > 0;
+}
+
+function metricValue(match: FlipResult | undefined, metric: AlertMetric): number {
+  if (!match) return 0;
+  switch (metric) {
+    case "margin_percent":
+      return match.MarginPercent ?? 0;
+    case "total_profit":
+      return match.TotalProfit ?? 0;
+    case "profit_per_unit":
+      return match.ProfitPerUnit ?? 0;
+    case "daily_volume":
+      return match.DailyVolume ?? 0;
+    default:
+      return 0;
+  }
+}
+
+function formatMetricValue(metric: AlertMetric, value: number): string {
+  switch (metric) {
+    case "margin_percent":
+      return formatMargin(value);
+    case "total_profit":
+    case "profit_per_unit":
+      return formatISK(value);
+    case "daily_volume":
+      return `${Math.round(value).toLocaleString()}`;
+    default:
+      return String(value);
+  }
+}
+
+export function WatchlistTab({
+  latestResults,
+  alertChannels,
+  toggleAlertChannel,
+  alertTelegramToken,
+  setAlertTelegramToken,
+  alertTelegramChatID,
+  setAlertTelegramChatID,
+  alertDiscordWebhook,
+  setAlertDiscordWebhook,
+  handleTestAlert,
+  alertTestLoading,
+}: Props) {
   const { t } = useI18n();
   const { addToast } = useGlobalToast();
   const [items, setItems] = useState<WatchlistItem[]>([]);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState("");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("added_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -39,6 +128,20 @@ export function WatchlistTab({ latestResults }: Props) {
     id: number;
     name: string;
   } | null>(null);
+
+  const [editorItem, setEditorItem] = useState<WatchlistItem | null>(null);
+  const [historyViewer, setHistoryViewer] = useState<{
+    typeId?: number;
+    typeName?: string;
+  } | null>(null);
+  const [showAlertConfig, setShowAlertConfig] = useState(false);
+  const [editorEnabled, setEditorEnabled] = useState(false);
+  const [editorMetric, setEditorMetric] = useState<AlertMetric>("margin_percent");
+  const [editorThreshold, setEditorThreshold] = useState("0");
+  const editorMatch = useMemo(() => {
+    if (!editorItem) return undefined;
+    return latestResults.find((r) => r.TypeID === editorItem.type_id);
+  }, [editorItem, latestResults]);
 
   const reload = useCallback(() => {
     getWatchlist()
@@ -75,51 +178,64 @@ export function WatchlistTab({ latestResults }: Props) {
       );
   };
 
-  const handleSaveThreshold = (typeId: number) => {
-    const val = parseFloat(editValue);
-    if (!isNaN(val) && val >= 0) {
-      updateWatchlistItem(typeId, val)
-        .then((list) => {
-          setItems(list);
-          addToast(
-            t("watchlistThresholdSaved" as TranslationKey) ||
-              "Threshold updated",
-            "success",
-            2000,
-          );
-        })
-        .catch(() =>
-          addToast(
-            t("watchlistError" as TranslationKey) || "Operation failed",
-            "error",
-            3000,
-          ),
-        );
-    }
-    setEditingId(null);
+  const openAlertEditor = (item: WatchlistItem) => {
+    setEditorItem(item);
+    setEditorEnabled(isAlertEnabled(item));
+    setEditorMetric(getAlertMetric(item));
+    setEditorThreshold(String(getAlertThreshold(item)));
   };
 
-  // Cross-reference with latest scan results
+  const saveAlertEditor = () => {
+    if (!editorItem) return;
+    const threshold = Number(editorThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      addToast(t("watchlistError"), "error", 2500);
+      return;
+    }
+    updateWatchlistItem(editorItem.type_id, {
+      alert_enabled: editorEnabled,
+      alert_metric: editorMetric,
+      alert_threshold: threshold,
+      alert_min_margin: editorMetric === "margin_percent" ? threshold : 0,
+    })
+      .then((list) => {
+        setItems(list);
+        setEditorItem(null);
+        addToast(
+          t("watchlistThresholdSaved" as TranslationKey) || "Saved",
+          "success",
+          2000,
+        );
+      })
+      .catch(() =>
+        addToast(
+          t("watchlistError" as TranslationKey) || "Operation failed",
+          "error",
+          3000,
+        ),
+      );
+  };
+
   const enriched = useMemo(
     () =>
       items.map((item) => {
         const match = latestResults.find((r) => r.TypeID === item.type_id);
-        return { ...item, match };
+        const metric = getAlertMetric(item);
+        const threshold = getAlertThreshold(item);
+        const enabled = isAlertEnabled(item);
+        const current = metricValue(match, metric);
+        const isAlert = enabled && threshold > 0 && !!match && current >= threshold;
+        return { ...item, match, metric, threshold, enabled, current, isAlert };
       }),
     [items, latestResults],
   );
 
-  // Filter + sort
   const displayed = useMemo(() => {
     let list = enriched;
-
-    // Search filter
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((item) => item.type_name.toLowerCase().includes(q));
     }
-
-    // Sort
     list = [...list].sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
@@ -127,11 +243,10 @@ export function WatchlistTab({ latestResults }: Props) {
           cmp = a.type_name.localeCompare(b.type_name);
           break;
         case "alert_min_margin":
-          cmp = a.alert_min_margin - b.alert_min_margin;
+          cmp = a.threshold - b.threshold;
           break;
         case "margin":
-          cmp =
-            (a.match?.MarginPercent ?? -1) - (b.match?.MarginPercent ?? -1);
+          cmp = (a.match?.MarginPercent ?? -1) - (b.match?.MarginPercent ?? -1);
           break;
         case "profit":
           cmp = (a.match?.TotalProfit ?? -1) - (b.match?.TotalProfit ?? -1);
@@ -143,13 +258,11 @@ export function WatchlistTab({ latestResults }: Props) {
           cmp = (a.match?.SellPrice ?? -1) - (b.match?.SellPrice ?? -1);
           break;
         case "added_at":
-          cmp =
-            new Date(a.added_at).getTime() - new Date(b.added_at).getTime();
+          cmp = new Date(a.added_at).getTime() - new Date(b.added_at).getTime();
           break;
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
-
     return list;
   }, [enriched, search, sortKey, sortDir]);
 
@@ -161,16 +274,17 @@ export function WatchlistTab({ latestResults }: Props) {
       setSortDir("desc");
     }
   };
-
   const sortIndicator = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "";
 
-  // Export watchlist to clipboard
   const handleExport = () => {
     const data = items.map((i) => ({
       type_id: i.type_id,
       type_name: i.type_name,
       alert_min_margin: i.alert_min_margin,
+      alert_enabled: isAlertEnabled(i),
+      alert_metric: getAlertMetric(i),
+      alert_threshold: getAlertThreshold(i),
     }));
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     addToast(
@@ -181,7 +295,6 @@ export function WatchlistTab({ latestResults }: Props) {
     );
   };
 
-  // Import watchlist from clipboard
   const handleImport = async () => {
     try {
       const json = await navigator.clipboard.readText();
@@ -197,8 +310,20 @@ export function WatchlistTab({ latestResults }: Props) {
             item.alert_min_margin ?? 0,
           );
           if (r.inserted) imported++;
+          if (item.alert_metric || item.alert_threshold || item.alert_enabled) {
+            const importedThreshold = Number(item.alert_threshold ?? item.alert_min_margin ?? 0);
+            await updateWatchlistItem(item.type_id, {
+              alert_enabled:
+                typeof item.alert_enabled === "boolean"
+                  ? item.alert_enabled
+                  : importedThreshold > 0,
+              alert_metric: item.alert_metric ?? "margin_percent",
+              alert_threshold: importedThreshold,
+              alert_min_margin: Number(item.alert_min_margin ?? 0),
+            });
+          }
         } catch {
-          /* skip invalid */
+          // skip invalid row
         }
       }
       reload();
@@ -212,12 +337,14 @@ export function WatchlistTab({ latestResults }: Props) {
     }
   };
 
-  const columns: {
-    key: SortKey;
-    label: string;
-    align: string;
-    width: string;
-  }[] = [
+  const metricOptions: { value: AlertMetric; label: string; unit: string }[] = [
+    { value: "margin_percent", label: t("watchlistMetricMargin"), unit: "%" },
+    { value: "total_profit", label: t("watchlistMetricTotalProfit"), unit: "ISK" },
+    { value: "profit_per_unit", label: t("watchlistMetricProfitPerUnit"), unit: "ISK" },
+    { value: "daily_volume", label: t("watchlistMetricDailyVolume"), unit: t("watchlistMetricDailyVolumeUnit") },
+  ];
+
+  const columns: { key: SortKey; label: string; align: string; width: string }[] = [
     {
       key: "type_name",
       label: t("colItem"),
@@ -228,7 +355,7 @@ export function WatchlistTab({ latestResults }: Props) {
       key: "alert_min_margin",
       label: t("watchlistThreshold"),
       align: "text-right",
-      width: "min-w-[80px]",
+      width: "min-w-[130px]",
     },
     {
       key: "margin",
@@ -263,39 +390,45 @@ export function WatchlistTab({ latestResults }: Props) {
   ];
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-eve-border flex-wrap">
-        <span className="text-[10px] uppercase tracking-wider text-eve-dim font-medium shrink-0">
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-3 border-b border-eve-border px-3 py-2 flex-wrap">
+        <span className="shrink-0 text-[10px] uppercase tracking-wider text-eve-dim font-medium">
           ⭐ {t("tabWatchlist")} ({items.length})
         </span>
 
-        {/* Search */}
         {items.length > 0 && (
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={
-              t("watchlistSearch" as TranslationKey) || "Search..."
-            }
-            className="px-2 py-1 bg-eve-input border border-eve-border rounded-sm text-eve-text text-xs w-full sm:w-36
-                       focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30 transition-colors"
+            placeholder={t("watchlistSearch" as TranslationKey) || "Search..."}
+            className="w-full sm:w-36 px-2 py-1 bg-eve-input border border-eve-border rounded-sm text-eve-text text-xs focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30 transition-colors"
           />
         )}
-
         <div className="flex-1" />
-
-        {/* Actions */}
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowAlertConfig(true)}
+            className="px-2 py-1 rounded-sm text-[11px] text-eve-dim hover:text-eve-accent transition-colors"
+            title={t("alertConfigTitle")}
+          >
+            🔔 {t("alertConfigShort")}
+          </button>
           {items.length > 0 && (
             <>
+              <span className="text-eve-border">|</span>
+              <button
+                onClick={() => setHistoryViewer({})}
+                className="px-2 py-1 rounded-sm text-[11px] text-eve-dim hover:text-eve-accent transition-colors"
+                title={t("watchlistViewHistory")}
+              >
+                📋 {t("watchlistAlertHistory")}
+              </button>
+              <span className="text-eve-border">|</span>
               <button
                 onClick={handleExport}
                 className="px-2 py-1 rounded-sm text-[11px] text-eve-dim hover:text-eve-text transition-colors"
-                title={
-                  t("watchlistExport" as TranslationKey) || "Export"
-                }
+                title={t("watchlistExport" as TranslationKey) || "Export"}
               >
                 {t("presetExport" as TranslationKey) || "Export"}
               </button>
@@ -305,9 +438,7 @@ export function WatchlistTab({ latestResults }: Props) {
           <button
             onClick={handleImport}
             className="px-2 py-1 rounded-sm text-[11px] text-eve-dim hover:text-eve-text transition-colors"
-            title={
-              t("watchlistImport" as TranslationKey) || "Import"
-            }
+            title={t("watchlistImport" as TranslationKey) || "Import"}
           >
             {t("presetImport" as TranslationKey) || "Import"}
           </button>
@@ -320,12 +451,11 @@ export function WatchlistTab({ latestResults }: Props) {
         </div>
       </div>
 
-      {/* Table */}
       <div className="flex-1 min-h-0 overflow-auto table-scroll-wrapper table-scroll-container">
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-eve-dim text-xs">
+          <div className="flex h-full flex-col items-center justify-center text-eve-dim text-xs">
             <span>{t("watchlistEmpty")}</span>
-            <span className="text-[10px] mt-1 text-eve-dim/70">
+            <span className="mt-1 text-[10px] text-eve-dim/70">
               {t("watchlistHint")}
             </span>
           </div>
@@ -343,139 +473,96 @@ export function WatchlistTab({ latestResults }: Props) {
                     {sortIndicator(col.key)}
                   </th>
                 ))}
-                <th className="px-3 py-2 w-10" />
+                <th className="px-3 py-2 text-center text-[10px] text-eve-dim w-16">{t("watchlistAlertActions")}</th>
               </tr>
             </thead>
             <tbody>
-              {displayed.map((item, i) => {
-                const isAlert =
-                  item.alert_min_margin > 0 &&
-                  item.match &&
-                  item.match.MarginPercent >= item.alert_min_margin;
-
-                return (
-                  <tr
-                    key={item.type_id}
-                    className={`border-b border-eve-border/30 transition-colors ${
-                      isAlert
-                        ? "bg-green-900/20 hover:bg-green-900/30"
-                        : i % 2 === 0
-                          ? "bg-eve-panel hover:bg-eve-accent/5"
-                          : "bg-eve-dark hover:bg-eve-accent/5"
-                    }`}
-                  >
-                    {/* Item name */}
-                    <td className="px-3 py-2 text-eve-text font-medium">
-                      {isAlert && <span className="mr-1">🔔</span>}
-                      {item.type_name}
-                    </td>
-
-                    {/* Alert threshold */}
-                    <td className="px-3 py-2 text-right">
-                      {editingId === item.type_id ? (
-                        <input
-                          autoFocus
-                          type="number"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onBlur={() =>
-                            handleSaveThreshold(item.type_id)
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter")
-                              handleSaveThreshold(item.type_id);
-                            if (e.key === "Escape") setEditingId(null);
-                          }}
-                          className="w-16 px-1 py-0.5 bg-eve-input border border-eve-accent/50 rounded-sm text-eve-text text-xs font-mono text-right
-                                     focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                      ) : (
-                        <span
-                          onClick={() => {
-                            setEditingId(item.type_id);
-                            setEditValue(
-                              String(item.alert_min_margin),
-                            );
-                          }}
-                          className="font-mono text-eve-dim cursor-pointer hover:text-eve-accent transition-colors"
-                          title={t("watchlistClickToEdit")}
-                        >
-                          {item.alert_min_margin > 0
-                            ? `${item.alert_min_margin}%`
-                            : "—"}
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Current margin */}
-                    <td className="px-3 py-2 text-right font-mono">
-                      {item.match ? (
-                        <span
-                          className={
-                            item.match.MarginPercent > 10
-                              ? "text-green-400"
-                              : "text-eve-accent"
-                          }
-                        >
-                          {formatMargin(item.match.MarginPercent)}
-                        </span>
-                      ) : (
-                        <span className="text-eve-dim">—</span>
-                      )}
-                    </td>
-
-                    {/* Current profit */}
-                    <td className="px-3 py-2 text-right font-mono">
-                      {item.match ? (
-                        <span className="text-green-400">
-                          {formatISK(item.match.TotalProfit)}
-                        </span>
-                      ) : (
-                        <span className="text-eve-dim">—</span>
-                      )}
-                    </td>
-
-                    {/* Buy at */}
-                    <td className="px-3 py-2 text-right font-mono text-eve-text">
-                      {item.match ? formatISK(item.match.BuyPrice) : "—"}
-                    </td>
-
-                    {/* Sell at */}
-                    <td className="px-3 py-2 text-right font-mono text-eve-text">
-                      {item.match
-                        ? formatISK(item.match.SellPrice)
-                        : "—"}
-                    </td>
-
-                    {/* Added date */}
-                    <td className="px-3 py-2 text-center text-eve-dim">
-                      {new Date(item.added_at).toLocaleDateString()}
-                    </td>
-
-                    {/* Delete */}
-                    <td className="px-3 py-2 text-center">
-                      <button
-                        onClick={() =>
-                          setConfirmDelete({
-                            id: item.type_id,
-                            name: item.type_name,
-                          })
+              {displayed.map((item, i) => (
+                <tr
+                  key={item.type_id}
+                  onDoubleClick={() => openAlertEditor(item)}
+                  className={`border-b border-eve-border/30 transition-colors cursor-pointer ${
+                    item.isAlert
+                      ? "bg-green-900/20 hover:bg-green-900/30"
+                      : i % 2 === 0
+                        ? "bg-eve-panel hover:bg-eve-accent/5"
+                        : "bg-eve-dark hover:bg-eve-accent/5"
+                  }`}
+                  title={t("watchlistDoubleClickHint")}
+                >
+                  <td className="px-3 py-2 text-eve-text font-medium">
+                    {item.isAlert && <span className="mr-1">🔔</span>}
+                    {item.type_name}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {item.enabled && item.threshold > 0 ? (
+                      <span className="text-eve-accent">
+                        {`${metricOptions.find((m) => m.value === item.metric)?.label ?? item.metric}: ${formatMetricValue(item.metric, item.threshold)}`}
+                      </span>
+                    ) : (
+                      <span className="text-eve-dim">{t("watchlistAlertOff")}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {item.match ? (
+                      <span
+                        className={
+                          item.match.MarginPercent > 10 ? "text-green-400" : "text-eve-accent"
                         }
-                        className="text-eve-dim hover:text-eve-error transition-colors cursor-pointer text-sm"
+                      >
+                        {formatMargin(item.match.MarginPercent)}
+                      </span>
+                    ) : (
+                      <span className="text-eve-dim">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {item.match ? (
+                      <span className="text-green-400">{formatISK(item.match.TotalProfit)}</span>
+                    ) : (
+                      <span className="text-eve-dim">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-eve-text">
+                    {item.match ? formatISK(item.match.BuyPrice) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono text-eve-text">
+                    {item.match ? formatISK(item.match.SellPrice) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-center text-eve-dim">
+                    {new Date(item.added_at).toLocaleDateString()}
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHistoryViewer({ typeId: item.type_id, typeName: item.type_name });
+                        }}
+                        className="text-eve-dim hover:text-eve-accent transition-colors cursor-pointer text-xs px-1"
+                        title={t("watchlistViewHistory")}
+                      >
+                        📋
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDelete({ id: item.type_id, name: item.type_name });
+                        }}
+                        className="text-eve-dim hover:text-eve-error transition-colors cursor-pointer text-sm px-1"
                         title={t("removeFromWatchlist")}
                       >
                         ✕
                       </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         )}
       </div>
 
-      {/* Summary */}
       {enriched.some((e) => e.match) && (
         <div className="shrink-0 flex items-center gap-6 px-3 py-1.5 border-t border-eve-border text-xs">
           <span className="text-eve-dim">
@@ -487,20 +574,89 @@ export function WatchlistTab({ latestResults }: Props) {
           <span className="text-eve-dim">
             {t("watchlistAlerts")}:{" "}
             <span className="text-green-400 font-mono">
-              {
-                enriched.filter(
-                  (e) =>
-                    e.alert_min_margin > 0 &&
-                    e.match &&
-                    e.match.MarginPercent >= e.alert_min_margin,
-                ).length
-              }
+              {enriched.filter((e) => e.isAlert).length}
             </span>
           </span>
         </div>
       )}
 
-      {/* Confirm delete dialog */}
+      {editorItem && (
+        <Modal
+          open={true}
+          onClose={() => setEditorItem(null)}
+          title={t("watchlistAlertSetupTitle")}
+          width="max-w-lg"
+        >
+          <div className="p-4 space-y-3">
+            <div className="text-sm text-eve-text font-medium">{editorItem.type_name}</div>
+            <label className="flex items-center gap-2 text-sm text-eve-text">
+              <input
+                type="checkbox"
+                checked={editorEnabled}
+                onChange={(e) => setEditorEnabled(e.target.checked)}
+                className="rounded border-eve-border bg-eve-input text-eve-accent focus:ring-eve-accent/40"
+              />
+              <span>{t("watchlistAlertEnable")}</span>
+            </label>
+            <div>
+              <div className="mb-1 text-[11px] uppercase tracking-wider text-eve-dim">
+                {t("watchlistAlertMetric")}
+              </div>
+              <select
+                value={editorMetric}
+                onChange={(e) => setEditorMetric(e.target.value as AlertMetric)}
+                className="w-full px-2 py-2 text-sm bg-eve-input border border-eve-border rounded-sm text-eve-text focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30"
+              >
+                {metricOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <div className="mb-1 text-[11px] uppercase tracking-wider text-eve-dim">
+                {t("watchlistAlertThreshold")}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  value={editorThreshold}
+                  onChange={(e) => setEditorThreshold(e.target.value)}
+                  className="w-full px-2 py-2 text-sm bg-eve-input border border-eve-border rounded-sm text-eve-text focus:outline-none focus:border-eve-accent focus:ring-1 focus:ring-eve-accent/30"
+                />
+                <span className="text-xs text-eve-dim shrink-0">
+                  {metricOptions.find((m) => m.value === editorMetric)?.unit ?? ""}
+                </span>
+              </div>
+            </div>
+            {editorMatch && (
+              <div className="text-xs text-eve-dim">
+                {t("watchlistAlertCurrentValue")}:{" "}
+                <span className="text-eve-accent font-mono">
+                  {formatMetricValue(editorMetric, metricValue(editorMatch, editorMetric))}
+                </span>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setEditorItem(null)}
+                className="px-3 py-1.5 border border-eve-border rounded-sm text-xs text-eve-dim hover:text-eve-text hover:border-eve-accent/30 transition-colors"
+              >
+                {t("cancel")}
+              </button>
+              <button
+                onClick={saveAlertEditor}
+                className="px-3 py-1.5 border border-eve-accent/40 bg-eve-accent/10 rounded-sm text-xs text-eve-accent hover:bg-eve-accent/20 transition-colors"
+              >
+                {t("presetSaveBtn")}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {confirmDelete && (
         <ConfirmDialog
           open={true}
@@ -513,6 +669,110 @@ export function WatchlistTab({ latestResults }: Props) {
           onClose={() => setConfirmDelete(null)}
           variant="danger"
         />
+      )}
+
+      {historyViewer && (
+        <AlertHistoryViewer
+          typeId={historyViewer.typeId}
+          typeName={historyViewer.typeName}
+          onClose={() => setHistoryViewer(null)}
+        />
+      )}
+
+      {showAlertConfig && (
+        <Modal
+          open={true}
+          onClose={() => setShowAlertConfig(false)}
+          title={t("alertConfigTitle")}
+          width="max-w-xl"
+        >
+          <div className="p-4 space-y-4">
+            <p className="text-xs text-eve-dim">{t("alertConfigHint")}</p>
+            <div className="space-y-2">
+              <label className="flex items-center gap-3 p-2 rounded-sm border border-eve-border bg-eve-panel/40">
+                <input
+                  type="checkbox"
+                  checked={alertChannels.telegram}
+                  onChange={() => toggleAlertChannel("telegram")}
+                  className="accent-eve-accent"
+                />
+                <span className="text-sm text-eve-text">{t("alertChannelTelegram")}</span>
+              </label>
+              <div className="pl-9 pr-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <input
+                    type="password"
+                    value={alertTelegramToken}
+                    onChange={(e) => setAlertTelegramToken(e.target.value)}
+                    placeholder={t("alertConfigTelegramToken")}
+                    className="w-full px-2 py-1 rounded-sm border border-eve-border bg-eve-dark text-eve-text text-xs"
+                  />
+                  <input
+                    type="text"
+                    value={alertTelegramChatID}
+                    onChange={(e) => setAlertTelegramChatID(e.target.value)}
+                    placeholder={t("alertConfigTelegramChatID")}
+                    className="w-full px-2 py-1 rounded-sm border border-eve-border bg-eve-dark text-eve-text text-xs"
+                  />
+                </div>
+                <div className="mt-1 text-[10px] text-eve-dim">{t("alertConfigTelegramHint")}</div>
+              </div>
+              <label className="flex items-center gap-3 p-2 rounded-sm border border-eve-border bg-eve-panel/40">
+                <input
+                  type="checkbox"
+                  checked={alertChannels.discord}
+                  onChange={() => toggleAlertChannel("discord")}
+                  className="accent-eve-accent"
+                />
+                <span className="text-sm text-eve-text">{t("alertChannelDiscord")}</span>
+              </label>
+              <div className="pl-9 pr-1">
+                <input
+                  type="password"
+                  value={alertDiscordWebhook}
+                  onChange={(e) => setAlertDiscordWebhook(e.target.value)}
+                  placeholder={t("alertConfigDiscordWebhook")}
+                  className="w-full px-2 py-1 rounded-sm border border-eve-border bg-eve-dark text-eve-text text-xs"
+                />
+                <div className="mt-1 text-[10px] text-eve-dim">{t("alertConfigDiscordHint")}</div>
+              </div>
+              <label className="flex items-center gap-3 p-2 rounded-sm border border-eve-border bg-eve-panel/40">
+                <input
+                  type="checkbox"
+                  checked={alertChannels.desktop}
+                  onChange={() => toggleAlertChannel("desktop")}
+                  className="accent-eve-accent"
+                />
+                <span className="text-sm text-eve-text">{t("alertChannelDesktop")}</span>
+              </label>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-eve-dim">
+                {t("alertConfigSelected", {
+                  count:
+                    Number(alertChannels.telegram) +
+                    Number(alertChannels.discord) +
+                    Number(alertChannels.desktop),
+                })}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleTestAlert}
+                  disabled={alertTestLoading}
+                  className="px-3 py-1.5 rounded-sm border border-eve-border text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors disabled:opacity-50"
+                >
+                  {alertTestLoading ? `${t("loading")}...` : t("alertConfigTest")}
+                </button>
+                <button
+                  onClick={() => setShowAlertConfig(false)}
+                  className="px-3 py-1.5 rounded-sm border border-eve-border text-eve-dim hover:text-eve-accent hover:border-eve-accent/50 transition-colors"
+                >
+                  {t("dialogOk")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

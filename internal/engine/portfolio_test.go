@@ -8,18 +8,22 @@ import (
 	"eve-flipper/internal/esi"
 )
 
+var testTxnID int64
+
 // helper: build a wallet transaction for a given day offset (negative = past).
 func txn(dayOffset int, typeID int32, typeName string, locationID int64, locationName string, isBuy bool, price float64, qty int32) esi.WalletTransaction {
 	d := time.Now().UTC().AddDate(0, 0, dayOffset)
+	testTxnID++
 	return esi.WalletTransaction{
-		Date:         d.Format(time.RFC3339),
-		TypeID:       typeID,
-		TypeName:     typeName,
-		LocationID:   locationID,
-		LocationName: locationName,
-		IsBuy:        isBuy,
-		UnitPrice:    price,
-		Quantity:     qty,
+		TransactionID: testTxnID,
+		Date:          d.Format(time.RFC3339),
+		TypeID:        typeID,
+		TypeName:      typeName,
+		LocationID:    locationID,
+		LocationName:  locationName,
+		IsBuy:         isBuy,
+		UnitPrice:     price,
+		Quantity:      qty,
 	}
 }
 
@@ -63,8 +67,8 @@ func TestComputePortfolioPnL_SingleDay(t *testing.T) {
 	if math.Abs(day.NetPnL-500) > 1e-6 {
 		t.Errorf("NetPnL = %v, want 500", day.NetPnL)
 	}
-	if day.Transactions != 2 {
-		t.Errorf("Transactions = %d, want 2", day.Transactions)
+	if day.Transactions != 1 {
+		t.Errorf("Transactions = %d, want 1", day.Transactions)
 	}
 	if math.Abs(day.CumulativePnL-500) > 1e-6 {
 		t.Errorf("CumulativePnL = %v, want 500", day.CumulativePnL)
@@ -130,23 +134,24 @@ func TestComputePortfolioPnL_SharpeRatio(t *testing.T) {
 }
 
 func TestComputePortfolioPnL_DrawdownAndMaxDrawdown(t *testing.T) {
-	// Create a sequence that has a clear drawdown:
-	// Day 1: +1000 (cumulative: 1000, peak: 1000)
-	// Day 2: +500  (cumulative: 1500, peak: 1500)
-	// Day 3: -800  (cumulative: 700, drawdown: -800/1500 = -53.33%)
-	// Day 4: -300  (cumulative: 400, drawdown: -1100/1500 = -73.33%)
-	// Day 5: +200  (cumulative: 600, drawdown: -900/1500 = -60%)
+	// Realized daily PnL:
+	// Day 1: +1000 (buy 1000 -> sell 2000)
+	// Day 2: +500  (buy 500  -> sell 1000)
+	// Day 3: -800  (buy 1300 -> sell 500)
+	// Day 4: -300  (buy 600  -> sell 300)
+	// Day 5: +200  (buy 100  -> sell 300)
+	// Cumulative: 1000,1500,700,400,600
 	txns := []esi.WalletTransaction{
-		// Day 1: sell 1000, buy 0 => +1000
-		txn(-5, 34, "Trit", 1, "Jita", false, 1000, 1),
-		// Day 2: sell 500, buy 0 => +500
-		txn(-4, 34, "Trit", 1, "Jita", false, 500, 1),
-		// Day 3: sell 0, buy 800 => -800
-		txn(-3, 34, "Trit", 1, "Jita", true, 800, 1),
-		// Day 4: sell 0, buy 300 => -300
-		txn(-2, 34, "Trit", 1, "Jita", true, 300, 1),
-		// Day 5: sell 200, buy 0 => +200
-		txn(-1, 34, "Trit", 1, "Jita", false, 200, 1),
+		txn(-5, 34, "Trit", 1, "Jita", true, 1000, 1),
+		txn(-5, 34, "Trit", 1, "Jita", false, 2000, 1),
+		txn(-4, 34, "Trit", 1, "Jita", true, 500, 1),
+		txn(-4, 34, "Trit", 1, "Jita", false, 1000, 1),
+		txn(-3, 34, "Trit", 1, "Jita", true, 1300, 1),
+		txn(-3, 34, "Trit", 1, "Jita", false, 500, 1),
+		txn(-2, 34, "Trit", 1, "Jita", true, 600, 1),
+		txn(-2, 34, "Trit", 1, "Jita", false, 300, 1),
+		txn(-1, 34, "Trit", 1, "Jita", true, 100, 1),
+		txn(-1, 34, "Trit", 1, "Jita", false, 300, 1),
 	}
 	result := ComputePortfolioPnL(txns, 30)
 	if result == nil {
@@ -187,10 +192,14 @@ func TestComputePortfolioPnL_ProfitFactor(t *testing.T) {
 	// Gross profit = 500+300 = 800, Gross loss = 200+100 = 300
 	// Profit factor = 800/300 ≈ 2.667
 	txns := []esi.WalletTransaction{
-		txn(-4, 34, "T", 1, "J", false, 500, 1),
-		txn(-3, 34, "T", 1, "J", true, 200, 1),
-		txn(-2, 34, "T", 1, "J", false, 300, 1),
-		txn(-1, 34, "T", 1, "J", true, 100, 1),
+		txn(-4, 34, "T", 1, "J", true, 100, 1),
+		txn(-4, 34, "T", 1, "J", false, 600, 1), // +500
+		txn(-3, 34, "T", 1, "J", true, 500, 1),
+		txn(-3, 34, "T", 1, "J", false, 300, 1), // -200
+		txn(-2, 34, "T", 1, "J", true, 100, 1),
+		txn(-2, 34, "T", 1, "J", false, 400, 1), // +300
+		txn(-1, 34, "T", 1, "J", true, 250, 1),
+		txn(-1, 34, "T", 1, "J", false, 150, 1), // -100
 	}
 	result := ComputePortfolioPnL(txns, 30)
 	s := result.Summary
@@ -207,10 +216,14 @@ func TestComputePortfolioPnL_AvgWinLossAndExpectancy(t *testing.T) {
 	// WinRate = 2/4 = 0.5, LossRate = 2/4 = 0.5
 	// Expectancy = 0.5*400 - 0.5*150 = 200-75 = 125
 	txns := []esi.WalletTransaction{
-		txn(-4, 34, "T", 1, "J", false, 500, 1),
-		txn(-3, 34, "T", 1, "J", true, 200, 1),
-		txn(-2, 34, "T", 1, "J", false, 300, 1),
-		txn(-1, 34, "T", 1, "J", true, 100, 1),
+		txn(-4, 34, "T", 1, "J", true, 100, 1),
+		txn(-4, 34, "T", 1, "J", false, 600, 1), // +500
+		txn(-3, 34, "T", 1, "J", true, 500, 1),
+		txn(-3, 34, "T", 1, "J", false, 300, 1), // -200
+		txn(-2, 34, "T", 1, "J", true, 100, 1),
+		txn(-2, 34, "T", 1, "J", false, 400, 1), // +300
+		txn(-1, 34, "T", 1, "J", true, 250, 1),
+		txn(-1, 34, "T", 1, "J", false, 150, 1), // -100
 	}
 	result := ComputePortfolioPnL(txns, 30)
 	s := result.Summary
@@ -232,9 +245,12 @@ func TestComputePortfolioPnL_CalmarRatio(t *testing.T) {
 	// Annualized return = 700 * 365 / 3
 	// Calmar = annualized return / 500
 	txns := []esi.WalletTransaction{
-		txn(-3, 34, "T", 1, "J", false, 1000, 1),
-		txn(-2, 34, "T", 1, "J", true, 500, 1),
-		txn(-1, 34, "T", 1, "J", false, 200, 1),
+		txn(-3, 34, "T", 1, "J", true, 100, 1),
+		txn(-3, 34, "T", 1, "J", false, 1100, 1), // +1000
+		txn(-2, 34, "T", 1, "J", true, 800, 1),
+		txn(-2, 34, "T", 1, "J", false, 300, 1), // -500
+		txn(-1, 34, "T", 1, "J", true, 100, 1),
+		txn(-1, 34, "T", 1, "J", false, 300, 1), // +200
 	}
 	result := ComputePortfolioPnL(txns, 30)
 	s := result.Summary
@@ -368,5 +384,151 @@ func TestComputePortfolioPnL_AllLosingDays(t *testing.T) {
 	}
 	if s.ProfitFactor != 0 {
 		t.Errorf("ProfitFactor = %v, want 0 (no gross profit)", s.ProfitFactor)
+	}
+}
+
+func TestComputePortfolioPnLWithOptions_StrictUnmatchedExcluded(t *testing.T) {
+	txns := []esi.WalletTransaction{
+		// Sell without known buy in lookback.
+		txn(-1, 34, "Tritanium", 60003760, "Jita", false, 120, 10),
+	}
+	got := ComputePortfolioPnLWithOptions(txns, PortfolioPnLOptions{
+		LookbackDays:         30,
+		SalesTaxPercent:      0,
+		BrokerFeePercent:     0,
+		LedgerLimit:          100,
+		IncludeUnmatchedSell: false,
+	})
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if len(got.DailyPnL) != 0 {
+		t.Fatalf("strict mode should exclude unmatched sells, got daily=%d", len(got.DailyPnL))
+	}
+	if got.Coverage.UnmatchedSellQty != 10 {
+		t.Fatalf("unmatched qty = %d, want 10", got.Coverage.UnmatchedSellQty)
+	}
+	if got.Coverage.MatchedSellQty != 0 {
+		t.Fatalf("matched qty = %d, want 0", got.Coverage.MatchedSellQty)
+	}
+}
+
+func TestComputePortfolioPnLWithOptions_OpenPositions(t *testing.T) {
+	txns := []esi.WalletTransaction{
+		txn(-3, 34, "Tritanium", 60003760, "Jita", true, 100, 10),
+		txn(-2, 34, "Tritanium", 60003760, "Jita", false, 120, 4),
+	}
+	got := ComputePortfolioPnLWithOptions(txns, PortfolioPnLOptions{
+		LookbackDays:         30,
+		SalesTaxPercent:      0,
+		BrokerFeePercent:     0,
+		LedgerLimit:          100,
+		IncludeUnmatchedSell: false,
+	})
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if len(got.OpenPositions) != 1 {
+		t.Fatalf("open positions len = %d, want 1", len(got.OpenPositions))
+	}
+	if got.OpenPositions[0].Quantity != 6 {
+		t.Fatalf("open quantity = %d, want 6", got.OpenPositions[0].Quantity)
+	}
+	if math.Abs(got.OpenPositions[0].CostBasis-600) > 1e-6 {
+		t.Fatalf("open cost basis = %v, want 600", got.OpenPositions[0].CostBasis)
+	}
+}
+
+func TestComputePortfolioPnLWithOptions_LedgerLimitKeepsNewest(t *testing.T) {
+	txns := []esi.WalletTransaction{
+		txn(-3, 34, "Tritanium", 60003760, "Jita", true, 100, 1),
+		txn(-3, 34, "Tritanium", 60003760, "Jita", false, 110, 1),
+		txn(-2, 34, "Tritanium", 60003760, "Jita", true, 100, 1),
+		txn(-2, 34, "Tritanium", 60003760, "Jita", false, 120, 1),
+		txn(-1, 34, "Tritanium", 60003760, "Jita", true, 100, 1),
+		txn(-1, 34, "Tritanium", 60003760, "Jita", false, 130, 1),
+	}
+	got := ComputePortfolioPnLWithOptions(txns, PortfolioPnLOptions{
+		LookbackDays:         30,
+		SalesTaxPercent:      0,
+		BrokerFeePercent:     0,
+		LedgerLimit:          2,
+		IncludeUnmatchedSell: false,
+	})
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if len(got.Ledger) != 2 {
+		t.Fatalf("ledger len = %d, want 2", len(got.Ledger))
+	}
+	if math.Abs(got.Ledger[0].SellUnitPrice-130) > 1e-6 {
+		t.Fatalf("ledger[0] sell price = %v, want 130", got.Ledger[0].SellUnitPrice)
+	}
+	if math.Abs(got.Ledger[1].SellUnitPrice-120) > 1e-6 {
+		t.Fatalf("ledger[1] sell price = %v, want 120", got.Ledger[1].SellUnitPrice)
+	}
+}
+
+func TestComputePortfolioPnLWithOptions_OpenPositionsGroupedByLocation(t *testing.T) {
+	txns := []esi.WalletTransaction{
+		txn(-2, 34, "Tritanium", 60003760, "Jita", true, 100, 5),
+		txn(-1, 34, "Tritanium", 60008494, "Amarr", true, 120, 7),
+	}
+	got := ComputePortfolioPnLWithOptions(txns, PortfolioPnLOptions{
+		LookbackDays:         30,
+		SalesTaxPercent:      0,
+		BrokerFeePercent:     0,
+		LedgerLimit:          100,
+		IncludeUnmatchedSell: false,
+	})
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if len(got.OpenPositions) != 2 {
+		t.Fatalf("open positions len = %d, want 2", len(got.OpenPositions))
+	}
+	byLocation := make(map[int64]OpenPosition, len(got.OpenPositions))
+	for _, p := range got.OpenPositions {
+		byLocation[p.LocationID] = p
+	}
+	jita, okJ := byLocation[60003760]
+	amarr, okA := byLocation[60008494]
+	if !okJ || !okA {
+		t.Fatalf("expected both Jita and Amarr positions, got %+v", byLocation)
+	}
+	if jita.Quantity != 5 {
+		t.Fatalf("jita qty = %d, want 5", jita.Quantity)
+	}
+	if amarr.Quantity != 7 {
+		t.Fatalf("amarr qty = %d, want 7", amarr.Quantity)
+	}
+	if math.Abs(jita.CostBasis-500) > 1e-6 {
+		t.Fatalf("jita cost basis = %v, want 500", jita.CostBasis)
+	}
+	if math.Abs(amarr.CostBasis-840) > 1e-6 {
+		t.Fatalf("amarr cost basis = %v, want 840", amarr.CostBasis)
+	}
+}
+
+func TestComputePortfolioPnLWithOptions_OpenPositionsSummaryNotTruncated(t *testing.T) {
+	txns := make([]esi.WalletTransaction, 0, 55)
+	for i := 0; i < 55; i++ {
+		txns = append(txns, txn(-1, int32(10000+i), "Type", 60003760, "Jita", true, 10, 1))
+	}
+	got := ComputePortfolioPnLWithOptions(txns, PortfolioPnLOptions{
+		LookbackDays:         30,
+		SalesTaxPercent:      0,
+		BrokerFeePercent:     0,
+		LedgerLimit:          100,
+		IncludeUnmatchedSell: false,
+	})
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if got.Summary.OpenPositions != 55 {
+		t.Fatalf("summary open positions = %d, want 55", got.Summary.OpenPositions)
+	}
+	if len(got.OpenPositions) != 50 {
+		t.Fatalf("returned open positions len = %d, want 50 (UI cap)", len(got.OpenPositions))
 	}
 }

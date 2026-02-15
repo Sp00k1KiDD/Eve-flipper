@@ -40,7 +40,7 @@ export function Modal({ open, onClose, title, children, width = "max-w-4xl" }: M
       }}
     >
       <div
-        className={`w-full h-[95vh] sm:h-auto sm:${width} sm:mx-4 sm:max-h-[85vh] flex flex-col bg-eve-dark border border-eve-border rounded-t-lg sm:rounded-sm shadow-2xl`}
+        className={`w-full ${width} mx-2 sm:mx-4 h-[95vh] sm:h-auto sm:max-h-[85vh] flex flex-col bg-eve-dark border border-eve-border rounded-t-lg sm:rounded-sm shadow-2xl`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 sm:py-3 border-b border-eve-border bg-eve-panel shrink-0">

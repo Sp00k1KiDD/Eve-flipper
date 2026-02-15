@@ -155,10 +155,10 @@
 /* ---------- LIGHT palettes ---------- */
 
 [data-palette="classic"][data-mode="light"] {
-  --eve-dark: 245 245 240;
-  --eve-panel: 255 255 255;
-  --eve-panel-hover: 240 240 235;
-  --eve-input: 248 248 245;
+  --eve-dark: 255 255 255;
+  --eve-panel: 250 250 250;
+  --eve-panel-hover: 245 245 245;
+  --eve-input: 248 248 248;
   --eve-accent: 192 120 0;
   --eve-accent-hover: 160 101 0;
   --eve-accent-dim: 138 88 0;
@@ -167,123 +167,123 @@
   --eve-success: 0 138 58;
   --eve-error: 192 32 32;
   --eve-warning: 192 120 0;
-  --eve-border: 216 216 208;
-  --eve-border-light: 200 200 192;
+  --eve-border: 228 228 228;
+  --eve-border-light: 212 212 212;
   --eve-glow: rgba(192, 120, 0, 0.1);
   --eve-selection: rgba(192, 120, 0, 0.2);
-  --eve-scrollbar-track: #f0f0eb;
-  --eve-scrollbar-thumb: #c8c8c0;
-  --eve-scrollbar-thumb-hover: #a0a098;
+  --eve-scrollbar-track: #f5f5f5;
+  --eve-scrollbar-thumb: #d0d0d0;
+  --eve-scrollbar-thumb-hover: #b0b0b0;
 }
 
 [data-palette="caldari"][data-mode="light"] {
-  --eve-dark: 240 244 248;
-  --eve-panel: 255 255 255;
-  --eve-panel-hover: 232 240 248;
-  --eve-input: 240 246 252;
+  --eve-dark: 255 255 255;
+  --eve-panel: 250 250 250;
+  --eve-panel-hover: 245 245 245;
+  --eve-input: 248 248 248;
   --eve-accent: 26 110 192;
   --eve-accent-hover: 10 90 160;
   --eve-accent-dim: 24 96 168;
-  --eve-text: 26 42 58;
-  --eve-dim: 90 106 122;
+  --eve-text: 42 42 42;
+  --eve-dim: 106 106 106;
   --eve-success: 0 138 58;
   --eve-error: 192 32 32;
   --eve-warning: 192 120 0;
-  --eve-border: 200 216 232;
-  --eve-border-light: 176 192 208;
+  --eve-border: 228 228 228;
+  --eve-border-light: 212 212 212;
   --eve-glow: rgba(26, 110, 192, 0.1);
   --eve-selection: rgba(26, 110, 192, 0.2);
-  --eve-scrollbar-track: #f0f4f8;
-  --eve-scrollbar-thumb: #b0c0d0;
-  --eve-scrollbar-thumb-hover: #8a9ab0;
+  --eve-scrollbar-track: #f5f5f5;
+  --eve-scrollbar-thumb: #d0d0d0;
+  --eve-scrollbar-thumb-hover: #b0b0b0;
 }
 
 [data-palette="amarr"][data-mode="light"] {
-  --eve-dark: 248 245 240;
-  --eve-panel: 255 254 248;
-  --eve-panel-hover: 245 240 232;
-  --eve-input: 250 248 240;
+  --eve-dark: 255 255 255;
+  --eve-panel: 250 250 250;
+  --eve-panel-hover: 245 245 245;
+  --eve-input: 248 248 248;
   --eve-accent: 160 128 0;
   --eve-accent-hover: 136 106 0;
   --eve-accent-dim: 122 98 0;
-  --eve-text: 42 40 24;
-  --eve-dim: 106 100 80;
+  --eve-text: 42 42 42;
+  --eve-dim: 106 106 106;
   --eve-success: 0 138 58;
   --eve-error: 192 32 32;
   --eve-warning: 192 120 0;
-  --eve-border: 224 216 192;
-  --eve-border-light: 208 200 168;
+  --eve-border: 228 228 228;
+  --eve-border-light: 212 212 212;
   --eve-glow: rgba(160, 128, 0, 0.1);
   --eve-selection: rgba(160, 128, 0, 0.2);
-  --eve-scrollbar-track: #f8f5f0;
-  --eve-scrollbar-thumb: #d0c8a8;
-  --eve-scrollbar-thumb-hover: #b0a888;
+  --eve-scrollbar-track: #f5f5f5;
+  --eve-scrollbar-thumb: #d0d0d0;
+  --eve-scrollbar-thumb-hover: #b0b0b0;
 }
 
 [data-palette="minmatar"][data-mode="light"] {
-  --eve-dark: 248 242 240;
-  --eve-panel: 255 250 248;
-  --eve-panel-hover: 245 236 232;
-  --eve-input: 250 245 242;
+  --eve-dark: 255 255 255;
+  --eve-panel: 250 250 250;
+  --eve-panel-hover: 245 245 245;
+  --eve-input: 248 248 248;
   --eve-accent: 184 48 32;
   --eve-accent-hover: 160 40 24;
   --eve-accent-dim: 136 32 24;
-  --eve-text: 42 24 24;
-  --eve-dim: 122 90 90;
+  --eve-text: 42 42 42;
+  --eve-dim: 106 106 106;
   --eve-success: 0 138 58;
   --eve-error: 192 32 32;
   --eve-warning: 192 120 0;
-  --eve-border: 224 200 200;
-  --eve-border-light: 208 176 176;
+  --eve-border: 228 228 228;
+  --eve-border-light: 212 212 212;
   --eve-glow: rgba(184, 48, 32, 0.1);
   --eve-selection: rgba(184, 48, 32, 0.2);
-  --eve-scrollbar-track: #f8f2f0;
-  --eve-scrollbar-thumb: #d0b0b0;
-  --eve-scrollbar-thumb-hover: #b09090;
+  --eve-scrollbar-track: #f5f5f5;
+  --eve-scrollbar-thumb: #d0d0d0;
+  --eve-scrollbar-thumb-hover: #b0b0b0;
 }
 
 [data-palette="gallente"][data-mode="light"] {
-  --eve-dark: 240 248 240;
-  --eve-panel: 248 255 248;
-  --eve-panel-hover: 232 245 232;
-  --eve-input: 242 250 242;
+  --eve-dark: 255 255 255;
+  --eve-panel: 250 250 250;
+  --eve-panel-hover: 245 245 245;
+  --eve-input: 248 248 248;
   --eve-accent: 26 138 58;
   --eve-accent-hover: 16 112 40;
   --eve-accent-dim: 10 96 32;
-  --eve-text: 26 42 26;
-  --eve-dim: 90 122 90;
+  --eve-text: 42 42 42;
+  --eve-dim: 106 106 106;
   --eve-success: 26 138 58;
   --eve-error: 192 32 32;
   --eve-warning: 192 120 0;
-  --eve-border: 192 216 192;
-  --eve-border-light: 168 200 168;
+  --eve-border: 228 228 228;
+  --eve-border-light: 212 212 212;
   --eve-glow: rgba(26, 138, 58, 0.1);
   --eve-selection: rgba(26, 138, 58, 0.2);
-  --eve-scrollbar-track: #f0f8f0;
-  --eve-scrollbar-thumb: #a8c8a8;
-  --eve-scrollbar-thumb-hover: #88a888;
+  --eve-scrollbar-track: #f5f5f5;
+  --eve-scrollbar-thumb: #d0d0d0;
+  --eve-scrollbar-thumb-hover: #b0b0b0;
 }
 
 [data-palette="serpentis"][data-mode="light"] {
-  --eve-dark: 244 240 248;
-  --eve-panel: 250 248 255;
-  --eve-panel-hover: 239 232 245;
-  --eve-input: 245 242 250;
+  --eve-dark: 255 255 255;
+  --eve-panel: 250 250 250;
+  --eve-panel-hover: 245 245 245;
+  --eve-input: 248 248 248;
   --eve-accent: 124 92 192;
   --eve-accent-hover: 106 72 168;
   --eve-accent-dim: 90 60 144;
-  --eve-text: 30 24 42;
-  --eve-dim: 106 90 122;
+  --eve-text: 42 42 42;
+  --eve-dim: 106 106 106;
   --eve-success: 0 138 58;
   --eve-error: 192 32 32;
   --eve-warning: 192 120 0;
-  --eve-border: 208 200 224;
-  --eve-border-light: 192 176 208;
+  --eve-border: 228 228 228;
+  --eve-border-light: 212 212 212;
   --eve-glow: rgba(124, 92, 192, 0.1);
   --eve-selection: rgba(124, 92, 192, 0.2);
-  --eve-scrollbar-track: #f4f0f8;
-  --eve-scrollbar-thumb: #c0b0d0;
-  --eve-scrollbar-thumb-hover: #a090b0;
+  --eve-scrollbar-track: #f5f5f5;
+  --eve-scrollbar-thumb: #d0d0d0;
+  --eve-scrollbar-thumb-hover: #b0b0b0;
 }
 
 /* ===================================================================
@@ -362,4 +362,35 @@
 @media (pointer: coarse) {
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { min-height: 40px; }
+}
+
+/* ===================================================================
+   Discord icon animation (every 3 minutes)
+   =================================================================== */
+
+@keyframes discord-pulse {
+  0%, 97% {
+    filter: drop-shadow(0 0 0 transparent);
+    transform: scale(1);
+  }
+  98% {
+    filter: drop-shadow(0 0 8px rgb(var(--eve-accent)));
+    transform: scale(1.15);
+  }
+  98.5% {
+    filter: drop-shadow(0 0 12px rgb(var(--eve-accent)));
+    transform: scale(1.2);
+  }
+  99% {
+    filter: drop-shadow(0 0 8px rgb(var(--eve-accent)));
+    transform: scale(1.15);
+  }
+  100% {
+    filter: drop-shadow(0 0 0 transparent);
+    transform: scale(1);
+  }
+}
+
+.discord-icon-animated {
+  animation: discord-pulse 360s ease-in-out infinite;
 }

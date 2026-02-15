@@ -24,6 +24,15 @@ func TestDefault_Values(t *testing.T) {
 	if c.SalesTaxPercent != 8 {
 		t.Errorf("SalesTaxPercent = %v, want 8", c.SalesTaxPercent)
 	}
+	if c.AlertTelegram {
+		t.Error("AlertTelegram = true, want false")
+	}
+	if c.AlertDiscord {
+		t.Error("AlertDiscord = true, want false")
+	}
+	if !c.AlertDesktop {
+		t.Error("AlertDesktop = false, want true")
+	}
 	if c.Opacity != 230 {
 		t.Errorf("Opacity = %v, want 230", c.Opacity)
 	}

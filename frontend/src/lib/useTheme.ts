@@ -350,12 +350,12 @@ export interface PaletteMeta {
 }
 
 export const PALETTES: PaletteMeta[] = [
-  { id: "classic",   nameKey: "themeClassic",   accent: "#e69500", bg: "#0d0d0d" },
-  { id: "caldari",   nameKey: "themeCaldari",   accent: "#4a9eff", bg: "#0a0e14" },
-  { id: "amarr",     nameKey: "themeAmarr",     accent: "#ffd700", bg: "#12100a" },
-  { id: "minmatar",  nameKey: "themeMinmatar",  accent: "#e05040", bg: "#120a0a" },
-  { id: "gallente",  nameKey: "themeGallente",  accent: "#40c060", bg: "#0a120a" },
-  { id: "serpentis", nameKey: "themeSerpentis", accent: "#a78bfa", bg: "#0e0a14" },
+  { id: "classic",   nameKey: "themeClassic",   accent: "#e69500", bg: "#09090b" },
+  { id: "caldari",   nameKey: "themeCaldari",   accent: "#3b82f6", bg: "#09090b" },
+  { id: "amarr",     nameKey: "themeAmarr",     accent: "#eab308", bg: "#09090b" },
+  { id: "minmatar",  nameKey: "themeMinmatar",  accent: "#ef4444", bg: "#09090b" },
+  { id: "gallente",  nameKey: "themeGallente",  accent: "#22c55e", bg: "#09090b" },
+  { id: "serpentis", nameKey: "themeSerpentis", accent: "#8b5cf6", bg: "#09090b" },
 ];
 
 /** Color field metadata for the palette editor */

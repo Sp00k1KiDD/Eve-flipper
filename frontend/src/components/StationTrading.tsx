@@ -985,8 +985,8 @@ export function StationTrading({
             <ContextItem
               label={
                 watchlistIds.has(contextMenu.row.TypeID)
-                  ? t("removeFromWatchlist")
-                  : `⭐ ${t("addToWatchlist")}`
+                  ? t("untrackItem")
+                  : `⭐ ${t("trackItem")}`
               }
               onClick={() => {
                 const row = contextMenu.row;
@@ -1014,6 +1014,15 @@ export function StationTrading({
                 setContextMenu(null);
               }}
             />
+            {regionId > 0 && (
+              <ContextItem
+                label={t("placeDraft")}
+                onClick={() => {
+                  setExecPlanRow(contextMenu.row);
+                  setContextMenu(null);
+                }}
+              />
+            )}
             <ContextItem
               label={
                 pinnedKeys.has(stationRowKey(contextMenu.row))
@@ -1025,15 +1034,6 @@ export function StationTrading({
                 setContextMenu(null);
               }}
             />
-            {regionId > 0 && (
-              <ContextItem
-                label={t("execPlanCalculator")}
-                onClick={() => {
-                  setExecPlanRow(contextMenu.row);
-                  setContextMenu(null);
-                }}
-              />
-            )}
           </div>
         </>
       )}

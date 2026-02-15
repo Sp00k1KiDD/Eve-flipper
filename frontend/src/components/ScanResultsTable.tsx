@@ -861,8 +861,8 @@ export function ScanResultsTable({
             <ContextItem
               label={
                 watchlistIds.has(contextMenu.row.TypeID)
-                  ? t("removeFromWatchlist")
-                  : `\u2B50 ${t("addToWatchlist")}`
+                  ? t("untrackItem")
+                  : `\u2B50 ${t("trackItem")}`
               }
               onClick={() => {
                 const row = contextMenu.row;
@@ -890,6 +890,16 @@ export function ScanResultsTable({
                 setContextMenu(null);
               }}
             />
+            {(contextMenu.row.BuyRegionID != null ||
+              contextMenu.row.SellRegionID != null) && (
+              <ContextItem
+                label={t("placeDraft")}
+                onClick={() => {
+                  setExecPlanRow(contextMenu.row);
+                  setContextMenu(null);
+                }}
+              />
+            )}
             <ContextItem
               label={
                 pinnedIds.has(contextMenu.id) ? t("unpinRow") : t("pinRow")
@@ -899,16 +909,6 @@ export function ScanResultsTable({
                 setContextMenu(null);
               }}
             />
-            {(contextMenu.row.BuyRegionID != null ||
-              contextMenu.row.SellRegionID != null) && (
-              <ContextItem
-                label={t("execPlanCalculator")}
-                onClick={() => {
-                  setExecPlanRow(contextMenu.row);
-                  setContextMenu(null);
-                }}
-              />
-            )}
           </div>
         </>
       )}

@@ -208,23 +208,23 @@ func TestDB_ContractResultsRoundTrip_WithLongHorizonFields(t *testing.T) {
 	id := d.InsertHistory("contracts", "Jita", 1, 5_000_000)
 	in := []engine.ContractResult{
 		{
-			ContractID:             12345,
-			Title:                  "Test Contract",
-			Price:                  1_000_000_000,
-			MarketValue:            1_300_000_000,
-			Profit:                 200_000_000,
-			MarginPercent:          20,
-			ExpectedProfit:         120_000_000,
-			ExpectedMarginPercent:  12,
-			SellConfidence:         86.5,
-			EstLiquidationDays:     6.2,
-			ConservativeValue:      1_130_000_000,
-			CarryCost:              7_000_000,
-			Volume:                 12000,
-			StationName:            "Jita IV - Moon 4",
-			ItemCount:              12,
-			Jumps:                  0,
-			ProfitPerJump:          0,
+			ContractID:            12345,
+			Title:                 "Test Contract",
+			Price:                 1_000_000_000,
+			MarketValue:           1_300_000_000,
+			Profit:                200_000_000,
+			MarginPercent:         20,
+			ExpectedProfit:        120_000_000,
+			ExpectedMarginPercent: 12,
+			SellConfidence:        86.5,
+			EstLiquidationDays:    6.2,
+			ConservativeValue:     1_130_000_000,
+			CarryCost:             7_000_000,
+			Volume:                12000,
+			StationName:           "Jita IV - Moon 4",
+			ItemCount:             12,
+			Jumps:                 0,
+			ProfitPerJump:         0,
 		},
 	}
 	d.InsertContractResults(id, in)
@@ -315,15 +315,21 @@ func TestDB_ConfigRoundTrip(t *testing.T) {
 	defer d.Close()
 
 	cfg := &config.Config{
-		SystemName:      "Amarr",
-		CargoCapacity:   8000,
-		BuyRadius:       7,
-		SellRadius:      12,
-		MinMargin:       10,
-		SalesTaxPercent: 6,
-		Opacity:         200,
-		WindowW:         1024,
-		WindowH:         768,
+		SystemName:          "Amarr",
+		CargoCapacity:       8000,
+		BuyRadius:           7,
+		SellRadius:          12,
+		MinMargin:           10,
+		SalesTaxPercent:     6,
+		AlertTelegram:       true,
+		AlertDiscord:        true,
+		AlertDesktop:        false,
+		AlertTelegramToken:  "tg-token",
+		AlertTelegramChatID: "123456",
+		AlertDiscordWebhook: "https://discord.example/webhook",
+		Opacity:             200,
+		WindowW:             1024,
+		WindowH:             768,
 	}
 	if err := d.SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
@@ -334,6 +340,12 @@ func TestDB_ConfigRoundTrip(t *testing.T) {
 	}
 	if got.BuyRadius != 7 || got.SellRadius != 12 || got.MinMargin != 10 || got.SalesTaxPercent != 6 {
 		t.Errorf("LoadConfig radii/margin/tax = %d %d %v %v", got.BuyRadius, got.SellRadius, got.MinMargin, got.SalesTaxPercent)
+	}
+	if !got.AlertTelegram || !got.AlertDiscord || got.AlertDesktop {
+		t.Errorf("LoadConfig alerts = telegram=%v discord=%v desktop=%v", got.AlertTelegram, got.AlertDiscord, got.AlertDesktop)
+	}
+	if got.AlertTelegramToken != "tg-token" || got.AlertTelegramChatID != "123456" || got.AlertDiscordWebhook != "https://discord.example/webhook" {
+		t.Errorf("LoadConfig alert credentials mismatch: token=%q chat=%q webhook=%q", got.AlertTelegramToken, got.AlertTelegramChatID, got.AlertDiscordWebhook)
 	}
 	if got.WindowW != 1024 || got.WindowH != 768 {
 		t.Errorf("LoadConfig window = %dx%d", got.WindowW, got.WindowH)
@@ -390,5 +402,69 @@ func TestDB_DemandRegion_NotFound(t *testing.T) {
 	}
 	if got != nil {
 		t.Error("GetDemandRegion(99999) should return nil region")
+	}
+}
+
+func TestDB_Migrate_WatchlistHasAlertModelColumns(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	rows, err := d.sql.Query("PRAGMA table_info(watchlist)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(watchlist): %v", err)
+	}
+	defer rows.Close()
+
+	have := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan pragma row: %v", err)
+		}
+		have[name] = true
+	}
+
+	wantCols := []string{"alert_enabled", "alert_metric", "alert_threshold"}
+	for _, col := range wantCols {
+		if !have[col] {
+			t.Errorf("watchlist missing column %q", col)
+		}
+	}
+}
+
+func TestDB_WatchlistAlertSettingsRoundTrip(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+
+	inserted := d.AddWatchlistItem(config.WatchlistItem{
+		TypeID:         34,
+		TypeName:       "Tritanium",
+		AddedAt:        "2026-02-13T00:00:00Z",
+		AlertEnabled:   true,
+		AlertMetric:    "total_profit",
+		AlertThreshold: 2_500_000,
+	})
+	if !inserted {
+		t.Fatal("AddWatchlistItem returned false")
+	}
+
+	items := d.GetWatchlist()
+	if len(items) != 1 {
+		t.Fatalf("GetWatchlist len = %d, want 1", len(items))
+	}
+	if !items[0].AlertEnabled || items[0].AlertMetric != "total_profit" || items[0].AlertThreshold != 2_500_000 {
+		t.Fatalf("watchlist row mismatch after insert: %+v", items[0])
+	}
+
+	d.UpdateWatchlistItem(34, 0, true, "daily_volume", 1000)
+	items = d.GetWatchlist()
+	if len(items) != 1 {
+		t.Fatalf("GetWatchlist len after update = %d, want 1", len(items))
+	}
+	if !items[0].AlertEnabled || items[0].AlertMetric != "daily_volume" || items[0].AlertThreshold != 1000 {
+		t.Fatalf("watchlist row mismatch after update: %+v", items[0])
 	}
 }

@@ -20,10 +20,12 @@ import { Modal } from "./components/Modal";
 import { CharacterPopup } from "./components/CharacterPopup";
 import {
   getConfig,
+  sendAlertNotification,
   updateConfig,
   scan,
   scanMultiRegion,
   scanContracts,
+  testAlertChannels,
   getWatchlist,
 } from "./lib/api";
 import { useI18n } from "./lib/i18n";
@@ -49,6 +51,12 @@ type Tab =
   | "industry"
   | "demand"
   | "plex";
+
+type AlertChannels = {
+  telegram: boolean;
+  discord: boolean;
+  desktop: boolean;
+};
 
 function App() {
   const { t } = useI18n();
@@ -117,6 +125,15 @@ function App() {
   const [showWatchlist, setShowWatchlist] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showCharacter, setShowCharacter] = useState(false);
+  const [alertChannels, setAlertChannels] = useState<AlertChannels>({
+    telegram: false,
+    discord: false,
+    desktop: true,
+  });
+  const [alertTelegramToken, setAlertTelegramToken] = useState("");
+  const [alertTelegramChatID, setAlertTelegramChatID] = useState("");
+  const [alertDiscordWebhook, setAlertDiscordWebhook] = useState("");
+  const [alertTestLoading, setAlertTestLoading] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const { addToast } = useGlobalToast();
@@ -206,6 +223,67 @@ function App() {
 
   useKeyboardShortcuts(shortcuts);
 
+  const toggleAlertChannel = useCallback(
+    (channel: keyof AlertChannels) => {
+      setAlertChannels((prev) => {
+        const next = { ...prev, [channel]: !prev[channel] };
+        if (!next.telegram && !next.discord && !next.desktop) {
+          addToast(t("alertConfigAtLeastOne"), "warning", 2500);
+          return prev;
+        }
+        return next;
+      });
+    },
+    [addToast, t],
+  );
+
+  const handleTestAlert = useCallback(async () => {
+    setAlertTestLoading(true);
+    try {
+      const desktopMsg = `${t("appTitle")}: ${t("alertConfigTestSent")}`;
+      if (alertChannels.desktop) {
+        addToast(desktopMsg, "info", 2500);
+        if ("Notification" in window) {
+          if (Notification.permission === "granted") {
+            new Notification(t("appTitle"), { body: desktopMsg });
+          } else if (Notification.permission === "default") {
+            Notification.requestPermission().then((perm) => {
+              if (perm === "granted") {
+                new Notification(t("appTitle"), { body: desktopMsg });
+              }
+            });
+          }
+        }
+      }
+
+      const res = await testAlertChannels();
+      const sent = res.sent ?? [];
+      const failed = res.failed ? Object.keys(res.failed) : [];
+      if (sent.length > 0) {
+        addToast(
+          `${t("alertConfigTestSent")}: ${sent.join(", ")}`,
+          "success",
+          3000,
+        );
+      }
+      if (failed.length > 0) {
+        addToast(
+          `${t("alertConfigTestFailed")}: ${failed.join(", ")}`,
+          "warning",
+          3500,
+        );
+      }
+      if (sent.length === 0 && failed.length === 0) {
+        addToast(t("alertConfigNoExternalChannels"), "info", 2500);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      addToast(`${t("errorPrefix")}${msg}`, "error", 3500);
+    } finally {
+      setAlertTestLoading(false);
+    }
+  }, [addToast, t, alertChannels.desktop]);
+
   // Load config on mount
   useEffect(() => {
     getConfig()
@@ -220,6 +298,14 @@ function App() {
           sales_tax_percent: cfg.sales_tax_percent ?? prev.sales_tax_percent,
           broker_fee_percent: prev.broker_fee_percent,
         }));
+        setAlertChannels({
+          telegram: cfg.alert_telegram ?? false,
+          discord: cfg.alert_discord ?? false,
+          desktop: cfg.alert_desktop ?? true,
+        });
+        setAlertTelegramToken(cfg.alert_telegram_token ?? "");
+        setAlertTelegramChatID(cfg.alert_telegram_chat_id ?? "");
+        setAlertDiscordWebhook(cfg.alert_discord_webhook ?? "");
       })
       .catch(() => {})
       .finally(() => {
@@ -233,10 +319,18 @@ function App() {
     if (!configLoadedRef.current) return;
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      updateConfig(params).catch(() => {});
+      updateConfig({
+        ...params,
+        alert_telegram: alertChannels.telegram,
+        alert_discord: alertChannels.discord,
+        alert_desktop: alertChannels.desktop,
+        alert_telegram_token: alertTelegramToken,
+        alert_telegram_chat_id: alertTelegramChatID,
+        alert_discord_webhook: alertDiscordWebhook,
+      }).catch(() => {});
     }, 500);
     return () => clearTimeout(saveTimerRef.current);
-  }, [params]);
+  }, [params, alertChannels, alertTelegramToken, alertTelegramChatID, alertDiscordWebhook]);
 
   const handleScan = useCallback(async () => {
     if (scanning) {
@@ -281,17 +375,73 @@ function App() {
         try {
           const wl = await getWatchlist();
           for (const item of wl) {
-            if (item.alert_min_margin > 0) {
-              const match = results.find(
-                (r) =>
-                  r.TypeID === item.type_id &&
-                  r.MarginPercent > item.alert_min_margin,
-              );
-              if (match) {
-                addToast(
-                  `${match.TypeName}: ${t("alertTriggered", { margin: match.MarginPercent.toFixed(1), threshold: item.alert_min_margin.toFixed(0) })}`,
-                  "success",
-                );
+            const metric =
+              item.alert_metric === "total_profit" ||
+              item.alert_metric === "profit_per_unit" ||
+              item.alert_metric === "daily_volume" ||
+              item.alert_metric === "margin_percent"
+                ? item.alert_metric
+                : "margin_percent";
+            const threshold = Math.max(
+              0,
+              item.alert_threshold ?? item.alert_min_margin ?? 0,
+            );
+            const enabled =
+              typeof item.alert_enabled === "boolean"
+                ? item.alert_enabled
+                : threshold > 0;
+            if (!enabled || threshold <= 0) continue;
+
+            const match = results.find((r) => r.TypeID === item.type_id);
+            if (!match) continue;
+
+            const current =
+              metric === "margin_percent"
+                ? match.MarginPercent
+                : metric === "total_profit"
+                  ? match.TotalProfit
+                  : metric === "profit_per_unit"
+                    ? match.ProfitPerUnit
+                    : match.DailyVolume;
+
+            if (current < threshold) continue;
+
+            const metricLabel =
+              metric === "margin_percent"
+                ? t("watchlistMetricMargin")
+                : metric === "total_profit"
+                  ? t("watchlistMetricTotalProfit")
+                  : metric === "profit_per_unit"
+                    ? t("watchlistMetricProfitPerUnit")
+                    : t("watchlistMetricDailyVolume");
+            const currentText =
+              metric === "margin_percent"
+                ? `${current.toFixed(2)}%`
+                : metric === "daily_volume"
+                  ? `${Math.round(current).toLocaleString()}`
+                  : formatISK(current);
+            const thresholdText =
+              metric === "margin_percent"
+                ? `${threshold.toFixed(2)}%`
+                : metric === "daily_volume"
+                  ? `${Math.round(threshold).toLocaleString()}`
+                  : formatISK(threshold);
+            const msg = `${match.TypeName}: ${metricLabel} ${currentText} >= ${thresholdText}`;
+            if (alertChannels.telegram || alertChannels.discord) {
+              void sendAlertNotification(msg).catch(() => {});
+            }
+            if (alertChannels.desktop) {
+              addToast(msg, "success");
+              if ("Notification" in window) {
+                if (Notification.permission === "granted") {
+                  new Notification(t("appTitle"), { body: msg });
+                } else if (Notification.permission === "default") {
+                  Notification.requestPermission().then((perm) => {
+                    if (perm === "granted") {
+                      new Notification(t("appTitle"), { body: msg });
+                    }
+                  });
+                }
               }
             }
           }
@@ -306,7 +456,7 @@ function App() {
     } finally {
       setScanning(false);
     }
-  }, [scanning, tab, params, t, addToast]);
+  }, [scanning, tab, params, t, addToast, alertChannels]);
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -372,7 +522,7 @@ function App() {
               aria-label="Discord"
             >
               <svg
-                className="w-4 h-4"
+                className="w-4 h-4 discord-icon-animated"
                 viewBox="0 0 16 16"
                 fill="currentColor"
                 aria-hidden="true"
@@ -578,7 +728,7 @@ function App() {
             rel="noreferrer"
             className="flex items-center justify-center h-9 w-9 bg-eve-panel border border-eve-border rounded-sm text-eve-dim"
           >
-            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+            <svg className="w-4 h-4 discord-icon-animated" viewBox="0 0 16 16" fill="currentColor">
               <path d="M13.545 2.907a13.2 13.2 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.2 12.2 0 0 0-3.658 0 8 8 0 0 0-.412-.833.05.05 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.04.04 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032q.003.022.021.037a13.3 13.3 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019q.463-.63.818-1.329a.05.05 0 0 0-.01-.059l-.018-.011a9 9 0 0 1-1.248-.595.05.05 0 0 1-.02-.066l.015-.019q.127-.095.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.05.05 0 0 1 .053.007q.121.1.248.195a.05.05 0 0 1-.004.085 8 8 0 0 1-1.249.594.05.05 0 0 0-.03.03.05.05 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.2 13.2 0 0 0 4.001-2.02.05.05 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.03.03 0 0 0-.02-.019m-8.198 7.307c-.789 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612m5.316 0c-.788 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612" />
             </svg>
           </a>
@@ -765,7 +915,19 @@ function App() {
         title={t("tabWatchlist")}
         width="max-w-3xl"
       >
-        <WatchlistTab latestResults={[...radiusResults, ...regionResults]} />
+        <WatchlistTab
+          latestResults={[...radiusResults, ...regionResults]}
+          alertChannels={alertChannels}
+          toggleAlertChannel={toggleAlertChannel}
+          alertTelegramToken={alertTelegramToken}
+          setAlertTelegramToken={setAlertTelegramToken}
+          alertTelegramChatID={alertTelegramChatID}
+          setAlertTelegramChatID={setAlertTelegramChatID}
+          alertDiscordWebhook={alertDiscordWebhook}
+          setAlertDiscordWebhook={setAlertDiscordWebhook}
+          handleTestAlert={handleTestAlert}
+          alertTestLoading={alertTestLoading}
+        />
       </Modal>
 
       {/* History Modal */}

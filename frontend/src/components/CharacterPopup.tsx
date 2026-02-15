@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Modal } from "./Modal";
-import { getCharacterInfo, getCharacterRoles, getUndercuts, getPortfolioPnL, getPortfolioOptimization, type OptimizerResult } from "../lib/api";
+import { getCharacterInfo, getCharacterRoles, getOrderDesk, getUndercuts, getPortfolioPnL, getPortfolioOptimization, type OptimizerResult } from "../lib/api";
 import { useI18n, type TranslationKey } from "../lib/i18n";
-import type { CharacterInfo, CharacterOrder, CharacterRoles, HistoricalOrder, PortfolioPnL, ItemPnL, StationPnL, UndercutStatus, WalletTransaction, AssetStats, AllocationSuggestion } from "../lib/types";
+import type { CharacterInfo, CharacterOrder, CharacterRoles, HistoricalOrder, PortfolioPnL, ItemPnL, StationPnL, UndercutStatus, WalletTransaction, AssetStats, AllocationSuggestion, OrderDeskResponse } from "../lib/types";
 
 interface CharacterPopupProps {
   open: boolean;
@@ -11,7 +11,7 @@ interface CharacterPopupProps {
   characterName: string;
 }
 
-type CharTab = "overview" | "orders" | "history" | "transactions" | "pnl" | "risk" | "optimizer";
+type CharTab = "overview" | "orders" | "transactions" | "pnl" | "risk" | "optimizer";
 
 export function CharacterPopup({ open, onClose, characterId, characterName }: CharacterPopupProps) {
   const { t } = useI18n();
@@ -75,8 +75,7 @@ export function CharacterPopup({ open, onClose, characterId, characterName }: Ch
         <div className="flex items-center border-b border-eve-border bg-eve-panel">
           <div className="flex flex-1 overflow-x-auto scrollbar-thin">
             <TabBtn active={tab === "overview"} onClick={() => setTab("overview")} label={t("charOverview")} />
-            <TabBtn active={tab === "orders"} onClick={() => setTab("orders")} label={`${t("charActiveOrders")} (${data?.orders.length ?? 0})`} />
-            <TabBtn active={tab === "history"} onClick={() => setTab("history")} label={`${t("charOrderHistory")} (${data?.order_history?.length ?? 0})`} />
+            <TabBtn active={tab === "orders"} onClick={() => setTab("orders")} label={`${t("charOrders")} (${data?.orders.length ?? 0})`} />
             <TabBtn active={tab === "transactions"} onClick={() => setTab("transactions")} label={`${t("charTransactions")} (${data?.transactions?.length ?? 0})`} />
             <TabBtn active={tab === "pnl"} onClick={() => setTab("pnl")} label={t("charPnlTab")} />
             <TabBtn active={tab === "risk"} onClick={() => setTab("risk")} label={t("charRiskTab")} />
@@ -123,10 +122,13 @@ export function CharacterPopup({ open, onClose, characterId, characterName }: Ch
                 />
               )}
               {tab === "orders" && (
-                <OrdersTab orders={data.orders} formatIsk={formatIsk} t={t} />
-              )}
-              {tab === "history" && (
-                <HistoryTab history={data.order_history ?? []} formatIsk={formatIsk} formatDate={formatDate} t={t} />
+                <CombinedOrdersTab
+                  orders={data.orders}
+                  history={data.order_history ?? []}
+                  formatIsk={formatIsk}
+                  formatDate={formatDate}
+                  t={t}
+                />
               )}
               {tab === "transactions" && (
                 <TransactionsTab transactions={data.transactions ?? []} formatIsk={formatIsk} formatDate={formatDate} t={t} />
@@ -318,6 +320,8 @@ function PnLTab({ formatIsk, t }: PnLTabProps) {
   const [data, setData] = useState<PortfolioPnL | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [salesTax, setSalesTax] = useState(8);
+  const [brokerFee, setBrokerFee] = useState(1);
   const [chartMode, setChartMode] = useState<"daily" | "cumulative" | "drawdown">("daily");
   const [itemView, setItemView] = useState<"profit" | "loss">("profit");
   const [bottomView, setBottomView] = useState<"items" | "stations">("items");
@@ -325,11 +329,11 @@ function PnLTab({ formatIsk, t }: PnLTabProps) {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    getPortfolioPnL(period)
+    getPortfolioPnL(period, { salesTax, brokerFee, ledgerLimit: 500 })
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [period]);
+  }, [period, salesTax, brokerFee]);
 
   if (loading) {
     return (
@@ -362,22 +366,48 @@ function PnLTab({ formatIsk, t }: PnLTabProps) {
   return (
     <div className="space-y-4">
       {/* Period selector */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-eve-dim uppercase tracking-wider">{t("pnlTitle")}</div>
-        <div className="flex gap-1">
-          {([7, 30, 90, 180] as PnLPeriod[]).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-2.5 py-1 text-[10px] rounded-sm border transition-colors ${
-                period === p
-                  ? "bg-eve-accent/20 border-eve-accent text-eve-accent"
-                  : "bg-eve-panel border-eve-border text-eve-dim hover:text-eve-text hover:border-eve-accent/50"
-              }`}
-            >
-              {t(`pnlPeriod${p}d` as TranslationKey)}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1">
+            {([7, 30, 90, 180] as PnLPeriod[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-2.5 py-1 text-[10px] rounded-sm border transition-colors ${
+                  period === p
+                    ? "bg-eve-accent/20 border-eve-accent text-eve-accent"
+                    : "bg-eve-panel border-eve-border text-eve-dim hover:text-eve-text hover:border-eve-accent/50"
+                }`}
+              >
+                {t(`pnlPeriod${p}d` as TranslationKey)}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-eve-dim">{t("pnlSalesTax")}</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              value={salesTax}
+              onChange={(e) => setSalesTax(parseFloat(e.target.value) || 0)}
+              className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+            />
+          </div>
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-eve-dim">{t("pnlBrokerFee")}</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              value={brokerFee}
+              onChange={(e) => setBrokerFee(parseFloat(e.target.value) || 0)}
+              className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+            />
+          </div>
         </div>
       </div>
 
@@ -456,6 +486,32 @@ function PnLTab({ formatIsk, t }: PnLTabProps) {
           value={`${(summary.expectancy_per_trade ?? 0) >= 0 ? "+" : ""}${formatIsk(summary.expectancy_per_trade ?? 0)} ISK`}
           subvalue={t("pnlExpectancyHint")}
           color={(summary.expectancy_per_trade ?? 0) >= 0 ? "text-eve-profit" : "text-eve-error"}
+        />
+      </div>
+
+      {/* Ledger quality / matching stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard
+          label={t("pnlCoverageQty")}
+          value={`${(data.coverage?.match_rate_qty_pct ?? 0).toFixed(1)}%`}
+          subvalue={t("pnlCoverageHint")}
+          color={(data.coverage?.match_rate_qty_pct ?? 0) >= 80 ? "text-eve-profit" : (data.coverage?.match_rate_qty_pct ?? 0) >= 50 ? "text-eve-accent" : "text-eve-error"}
+        />
+        <StatCard
+          label={t("pnlMatchedSellQty")}
+          value={(data.coverage?.matched_sell_qty ?? 0).toLocaleString()}
+          subvalue={t("pnlTxns")}
+        />
+        <StatCard
+          label={t("pnlUnmatchedSellQty")}
+          value={(data.coverage?.unmatched_sell_qty ?? 0).toLocaleString()}
+          subvalue={t("pnlCoverageHint")}
+          color={(data.coverage?.unmatched_sell_qty ?? 0) > 0 ? "text-eve-warning" : "text-eve-dim"}
+        />
+        <StatCard
+          label={t("pnlOpenCostBasis")}
+          value={`${formatIsk(summary.open_cost_basis ?? 0)} ISK`}
+          subvalue={`${summary.open_positions ?? 0} ${t("pnlOpenPositions").toLowerCase()}`}
         />
       </div>
 
@@ -564,6 +620,22 @@ function PnLTab({ formatIsk, t }: PnLTabProps) {
             t={t}
           />
         )}
+      </div>
+
+      {/* Realized ledger */}
+      <div className="bg-eve-panel border border-eve-border rounded-sm p-3">
+        <div className="text-[10px] text-eve-dim uppercase tracking-wider mb-2">
+          {t("pnlRealizedLedger")} ({data.ledger?.length ?? 0})
+        </div>
+        <PnLLedgerTable ledger={data.ledger ?? []} formatIsk={formatIsk} t={t} />
+      </div>
+
+      {/* Open positions */}
+      <div className="bg-eve-panel border border-eve-border rounded-sm p-3">
+        <div className="text-[10px] text-eve-dim uppercase tracking-wider mb-2">
+          {t("pnlOpenPositions")} ({data.open_positions?.length ?? 0})
+        </div>
+        <PnLOpenPositionsTable positions={data.open_positions ?? []} formatIsk={formatIsk} t={t} />
       </div>
     </div>
   );
@@ -921,6 +993,110 @@ function PnLStationsTable({
               </tr>
             );
           })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PnLLedgerTable({
+  ledger,
+  formatIsk,
+  t,
+}: {
+  ledger: PortfolioPnL["ledger"];
+  formatIsk: (v: number) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+}) {
+  if (!ledger || ledger.length === 0) {
+    return <div className="text-center text-eve-dim text-xs py-4">{t("pnlNoData")}</div>;
+  }
+
+  return (
+    <div className="border border-eve-border rounded-sm overflow-hidden">
+      <table className="w-full text-xs">
+        <thead className="bg-eve-panel">
+          <tr className="text-eve-dim">
+            <th className="px-2 py-1.5 text-left">{t("pnlLedgerDate")}</th>
+            <th className="px-2 py-1.5 text-left">{t("pnlLedgerItem")}</th>
+            <th className="px-2 py-1.5 text-right">{t("pnlLedgerQty")}</th>
+            <th className="px-2 py-1.5 text-right">{t("pnlLedgerBuy")}</th>
+            <th className="px-2 py-1.5 text-right">{t("pnlLedgerSell")}</th>
+            <th className="px-2 py-1.5 text-right">{t("pnlLedgerHold")}</th>
+            <th className="px-2 py-1.5 text-right">{t("pnlLedgerPnl")}</th>
+            <th className="px-2 py-1.5 text-right">{t("pnlLedgerMargin")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ledger.slice(0, 120).map((row, idx) => {
+            const isProfit = (row.realized_pnl ?? 0) >= 0;
+            return (
+              <tr key={`${row.sell_transaction_id}-${row.buy_transaction_id}-${idx}`} className="border-t border-eve-border/50 hover:bg-eve-panel/50">
+                <td className="px-2 py-1.5 text-eve-dim">{(row.sell_date ?? "").slice(0, 10)}</td>
+                <td className="px-2 py-1.5 text-eve-text truncate max-w-[220px]" title={row.type_name}>
+                  {row.type_name || `#${row.type_id}`}
+                </td>
+                <td className="px-2 py-1.5 text-right text-eve-dim">{(row.quantity ?? 0).toLocaleString()}</td>
+                <td className="px-2 py-1.5 text-right text-eve-dim">{formatIsk(row.buy_total ?? 0)}</td>
+                <td className="px-2 py-1.5 text-right text-eve-dim">{formatIsk(row.sell_total ?? 0)}</td>
+                <td className="px-2 py-1.5 text-right text-eve-dim">{row.holding_days ?? 0}d</td>
+                <td className={`px-2 py-1.5 text-right ${isProfit ? "text-eve-profit" : "text-eve-error"}`}>
+                  {isProfit ? "+" : ""}{formatIsk(row.realized_pnl ?? 0)}
+                </td>
+                <td className={`px-2 py-1.5 text-right ${isProfit ? "text-eve-profit" : "text-eve-error"}`}>
+                  {(row.margin_percent ?? 0).toFixed(1)}%
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {ledger.length > 120 && (
+        <div className="text-center text-eve-dim text-xs py-2 bg-eve-panel">
+          {t("andMore", { count: ledger.length - 120 })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PnLOpenPositionsTable({
+  positions,
+  formatIsk,
+  t,
+}: {
+  positions: PortfolioPnL["open_positions"];
+  formatIsk: (v: number) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+}) {
+  if (!positions || positions.length === 0) {
+    return <div className="text-center text-eve-dim text-xs py-4">{t("pnlNoData")}</div>;
+  }
+
+  return (
+    <div className="border border-eve-border rounded-sm overflow-hidden">
+      <table className="w-full text-xs">
+        <thead className="bg-eve-panel">
+          <tr className="text-eve-dim">
+            <th className="px-3 py-2 text-left">{t("pnlOpenItem")}</th>
+            <th className="px-3 py-2 text-right">{t("pnlOpenQty")}</th>
+            <th className="px-3 py-2 text-right">{t("pnlOpenAvgCost")}</th>
+            <th className="px-3 py-2 text-right">{t("pnlOpenCostBasis")}</th>
+            <th className="px-3 py-2 text-right">{t("pnlOpenOldest")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((row) => (
+            <tr key={`${row.type_id}-${row.location_id}`} className="border-t border-eve-border/50 hover:bg-eve-panel/50">
+              <td className="px-3 py-2 text-eve-text truncate max-w-[260px]" title={row.type_name}>
+                {row.type_name || `#${row.type_id}`}
+              </td>
+              <td className="px-3 py-2 text-right text-eve-dim">{(row.quantity ?? 0).toLocaleString()}</td>
+              <td className="px-3 py-2 text-right text-eve-dim">{formatIsk(row.avg_cost ?? 0)}</td>
+              <td className="px-3 py-2 text-right text-eve-text">{formatIsk(row.cost_basis ?? 0)}</td>
+              <td className="px-3 py-2 text-right text-eve-dim">{row.oldest_lot_date || "—"}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -1611,6 +1787,537 @@ function RiskTab({ characterId, data, formatIsk, t }: RiskTabProps) {
   );
 }
 
+interface CombinedOrdersTabProps {
+  orders: CharacterOrder[];
+  history: HistoricalOrder[];
+  formatIsk: (v: number) => string;
+  formatDate: (d: string) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+}
+
+function CombinedOrdersTab({ orders, history, formatIsk, formatDate, t }: CombinedOrdersTabProps) {
+  const [subTab, setSubTab] = useState<"active" | "history">("active");
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Sub-tabs */}
+      <div className="flex gap-1 border-b border-eve-border bg-eve-panel/50 mb-3 -mt-4 -mx-4 px-4">
+        <button
+          onClick={() => setSubTab("active")}
+          className={`px-3 py-2 text-xs font-medium transition-colors ${
+            subTab === "active"
+              ? "text-eve-accent border-b-2 border-eve-accent"
+              : "text-eve-dim hover:text-eve-text"
+          }`}
+        >
+          {t("charActiveOrders")} ({orders.length})
+        </button>
+        <button
+          onClick={() => setSubTab("history")}
+          className={`px-3 py-2 text-xs font-medium transition-colors ${
+            subTab === "history"
+              ? "text-eve-accent border-b-2 border-eve-accent"
+              : "text-eve-dim hover:text-eve-text"
+          }`}
+        >
+          {t("charOrderHistory")} ({history.length})
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        {subTab === "active" && (
+          <ActiveOrdersWithDeskTab orders={orders} formatIsk={formatIsk} t={t} />
+        )}
+        {subTab === "history" && (
+          <HistoryTab history={history} formatIsk={formatIsk} formatDate={formatDate} t={t} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ActiveOrdersWithDeskTabProps {
+  orders: CharacterOrder[];
+  formatIsk: (v: number) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+}
+
+function ActiveOrdersWithDeskTab({ orders, formatIsk, t }: ActiveOrdersWithDeskTabProps) {
+  const [filter, setFilter] = useState<"all" | "buy" | "sell">("all");
+  const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
+  const [undercuts, setUndercuts] = useState<Record<number, UndercutStatus>>({});
+  const [undercutLoading, setUndercutLoading] = useState(false);
+  const [undercutLoaded, setUndercutLoaded] = useState(false);
+  const [undercutError, setUndercutError] = useState<string | null>(null);
+
+  // Order Desk state
+  const [salesTax, setSalesTax] = useState(8);
+  const [brokerFee, setBrokerFee] = useState(1);
+  const [targetEtaDays, setTargetEtaDays] = useState(3);
+  const [deskLoading, setDeskLoading] = useState(false);
+  const [deskError, setDeskError] = useState<string | null>(null);
+  const [deskData, setDeskData] = useState<OrderDeskResponse | null>(null);
+  const [showDesk, setShowDesk] = useState(false);
+
+  const filtered = orders.filter((o) => {
+    if (filter === "buy") return o.is_buy_order;
+    if (filter === "sell") return !o.is_buy_order;
+    return true;
+  });
+
+  const loadUndercuts = useCallback(async () => {
+    if (undercutLoaded || undercutLoading) return;
+    setUndercutLoading(true);
+    setUndercutError(null);
+    try {
+      const data = await getUndercuts();
+      const map: Record<number, UndercutStatus> = {};
+      for (const u of data) map[u.order_id] = u;
+      setUndercuts(map);
+      setUndercutLoaded(true);
+    } catch (e: any) {
+      setUndercutError(e?.message || "Unknown error");
+    } finally {
+      setUndercutLoading(false);
+    }
+  }, [undercutLoaded, undercutLoading]);
+
+  const toggleExpand = useCallback((orderId: number) => {
+    if (!undercutLoaded && !undercutLoading) loadUndercuts();
+    setExpandedOrder((prev) => (prev === orderId ? null : orderId));
+  }, [undercutLoaded, undercutLoading, loadUndercuts]);
+
+  const loadDesk = useCallback(() => {
+    setDeskLoading(true);
+    setDeskError(null);
+    getOrderDesk({ salesTax, brokerFee, targetEtaDays })
+      .then(setDeskData)
+      .catch((e) => setDeskError(e.message))
+      .finally(() => setDeskLoading(false));
+  }, [salesTax, brokerFee, targetEtaDays]);
+
+  const toggleDesk = useCallback(() => {
+    if (!showDesk && !deskData) {
+      loadDesk();
+    }
+    setShowDesk(!showDesk);
+  }, [showDesk, deskData, loadDesk]);
+
+  const deskRows = useMemo(() => {
+    const source = deskData?.orders ?? [];
+    if (filter === "buy") return source.filter((o) => o.is_buy_order);
+    if (filter === "sell") return source.filter((o) => !o.is_buy_order);
+    return source;
+  }, [deskData, filter]);
+
+  if (orders.length === 0) {
+    return <div className="text-center text-eve-dim py-8">{t("charNoOrders")}</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Filter + Order Desk Toggle */}
+      <div className="flex gap-2 items-center flex-wrap">
+        <FilterBtn active={filter === "all"} onClick={() => setFilter("all")} label={t("charAll")} count={orders.length} />
+        <FilterBtn active={filter === "buy"} onClick={() => setFilter("buy")} label={t("charBuy")} count={orders.filter((o) => o.is_buy_order).length} color="text-eve-profit" />
+        <FilterBtn active={filter === "sell"} onClick={() => setFilter("sell")} label={t("charSell")} count={orders.filter((o) => !o.is_buy_order).length} color="text-eve-error" />
+        <button
+          onClick={toggleDesk}
+          className={`px-2.5 py-1 text-[10px] rounded-sm border ${
+            showDesk
+              ? "border-eve-accent/50 bg-eve-accent/10 text-eve-accent"
+              : "border-eve-border text-eve-dim hover:text-eve-text hover:border-eve-accent/50"
+          }`}
+        >
+          {showDesk ? t("orderDeskHide") : t("orderDeskOpen")}
+        </button>
+      </div>
+
+      {/* Undercut error */}
+      {undercutError && (
+        <div className="bg-eve-error/10 border border-eve-error/30 rounded-sm px-3 py-2 text-xs text-eve-error">
+          {t("charUndercutError")}: {undercutError}
+        </div>
+      )}
+
+      {/* Order Desk Panel */}
+      {showDesk && (
+        <div className="border border-eve-accent/30 rounded-sm p-3 bg-eve-panel/30 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs text-eve-accent uppercase tracking-wider">{t("charOrderDeskTab")}</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-eve-dim">{t("pnlSalesTax")}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={salesTax}
+                  onChange={(e) => setSalesTax(parseFloat(e.target.value) || 0)}
+                  className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+                />
+              </div>
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-eve-dim">{t("pnlBrokerFee")}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.1}
+                  value={brokerFee}
+                  onChange={(e) => setBrokerFee(parseFloat(e.target.value) || 0)}
+                  className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+                />
+              </div>
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-eve-dim">{t("orderDeskTargetETA")}</span>
+                <input
+                  type="number"
+                  min={0.5}
+                  max={60}
+                  step={0.5}
+                  value={targetEtaDays}
+                  onChange={(e) => setTargetEtaDays(parseFloat(e.target.value) || 3)}
+                  className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+                />
+              </div>
+              <button
+                onClick={loadDesk}
+                disabled={deskLoading}
+                className="px-2.5 py-1 text-[10px] rounded-sm border bg-eve-panel border-eve-border text-eve-dim hover:text-eve-text hover:border-eve-accent/50 disabled:opacity-50"
+              >
+                {t("charRefresh")}
+              </button>
+            </div>
+          </div>
+
+          {deskError && (
+            <div className="bg-eve-error/10 border border-eve-error/30 rounded-sm px-3 py-2 text-xs text-eve-error">
+              {deskError}
+            </div>
+          )}
+
+          {deskLoading && !deskData && (
+            <div className="flex items-center justify-center py-4 text-eve-dim text-xs">
+              <span className="inline-block w-4 h-4 border-2 border-eve-accent/40 border-t-eve-accent rounded-full animate-spin mr-2" />
+              {t("loading")}...
+            </div>
+          )}
+
+          {deskData?.summary && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <StatCard label={t("charTotalOrders")} value={String(deskData.summary.total_orders)} subvalue={`${deskData.summary.buy_orders} BUY / ${deskData.summary.sell_orders} SELL`} />
+              <StatCard
+                label={t("orderDeskNeedAction")}
+                value={String(deskData.summary.needs_reprice + deskData.summary.needs_cancel)}
+                subvalue={`${deskData.summary.needs_reprice} reprice / ${deskData.summary.needs_cancel} cancel`}
+                color={(deskData.summary.needs_reprice + deskData.summary.needs_cancel) > 0 ? "text-eve-warning" : "text-eve-profit"}
+              />
+              <StatCard
+                label={t("orderDeskMedianETA")}
+                value={deskData.summary.median_eta_days > 0 ? `${deskData.summary.median_eta_days.toFixed(1)}d` : "—"}
+                subvalue={`${deskData.summary.unknown_eta_count} ${t("orderDeskUnknownETA").toLowerCase()}`}
+              />
+              <StatCard label={t("orderDeskNotional")} value={`${formatIsk(deskData.summary.total_notional)} ISK`} />
+            </div>
+          )}
+
+          {deskData && deskRows.length > 0 && (
+            <div className="border border-eve-border rounded-sm overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-eve-panel">
+                  <tr className="text-eve-dim">
+                    <th className="px-2 py-2 text-left">{t("orderDeskAction")}</th>
+                    <th className="px-2 py-2 text-left">{t("charOrderType")}</th>
+                    <th className="px-2 py-2 text-left">{t("colItemName")}</th>
+                    <th className="px-2 py-2 text-right">{t("charPrice")}</th>
+                    <th className="px-2 py-2 text-right">{t("charVolume")}</th>
+                    <th className="px-2 py-2 text-right">{t("orderDeskQueueAhead")}</th>
+                    <th className="px-2 py-2 text-right">{t("orderDeskETA")}</th>
+                    <th className="px-2 py-2 text-right">{t("orderDeskExpiry")}</th>
+                    <th className="px-2 py-2 text-right">{t("orderDeskSuggested")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {deskRows.map((row) => {
+                    const sideClass = row.is_buy_order ? "text-eve-profit" : "text-eve-error";
+                    const etaLabel = row.eta_days >= 0 ? `${row.eta_days.toFixed(1)}d` : "—";
+                    return (
+                      <tr key={row.order_id} className="border-t border-eve-border/50 hover:bg-eve-panel/50">
+                        <td className="px-2 py-2">
+                          <span
+                            className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              row.recommendation === "cancel"
+                                ? "bg-red-500/20 text-red-400"
+                                : row.recommendation === "reprice"
+                                  ? "bg-amber-500/20 text-amber-400"
+                                  : "bg-emerald-500/20 text-emerald-400"
+                            }`}
+                            title={row.reason}
+                          >
+                            {row.recommendation.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className={`px-2 py-2 ${sideClass}`}>{row.is_buy_order ? "BUY" : "SELL"} #{row.position}/{row.total_orders}</td>
+                        <td className="px-2 py-2 text-eve-text max-w-[220px] truncate" title={row.type_name}>{row.type_name || `#${row.type_id}`}</td>
+                        <td className="px-2 py-2 text-right text-eve-accent">{formatIsk(row.price)}</td>
+                        <td className="px-2 py-2 text-right text-eve-dim">{row.volume_remain.toLocaleString()}</td>
+                        <td className="px-2 py-2 text-right text-eve-dim">{row.queue_ahead_qty.toLocaleString()}</td>
+                        <td className={`px-2 py-2 text-right ${row.eta_days >= 0 && row.eta_days > targetEtaDays ? "text-eve-warning" : "text-eve-dim"}`}>{etaLabel}</td>
+                        <td className={`px-2 py-2 text-right ${row.days_to_expire >= 0 && row.days_to_expire <= 2 ? "text-eve-warning" : "text-eve-dim"}`}>{row.days_to_expire >= 0 ? `${row.days_to_expire}d` : "—"}</td>
+                        <td className="px-2 py-2 text-right text-eve-text">{formatIsk(row.suggested_price)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Active Orders Table */}
+      <div className="border border-eve-border rounded-sm overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-eve-panel">
+            <tr className="text-eve-dim">
+              <th className="px-3 py-2 text-left">{t("charOrderType")}</th>
+              <th className="px-3 py-2 text-left">{t("colItemName")}</th>
+              <th className="px-3 py-2 text-right">{t("charPrice")}</th>
+              <th className="px-3 py-2 text-right">{t("charVolume")}</th>
+              <th className="px-3 py-2 text-right">{t("charTotal")}</th>
+              <th className="px-3 py-2 text-left">{t("charLocation")}</th>
+              <th className="w-8"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((order) => {
+              const uc = undercuts[order.order_id];
+              const isExpanded = expandedOrder === order.order_id;
+              let indicatorColor = "bg-eve-dim/30 text-eve-dim";
+              if (uc) {
+                if (uc.position === 1) {
+                  indicatorColor = "bg-emerald-500/20 text-emerald-400";
+                } else if (uc.undercut_pct > 1) {
+                  indicatorColor = "bg-red-500/20 text-red-400";
+                } else if (uc.undercut_pct > 0) {
+                  indicatorColor = "bg-amber-500/20 text-amber-400";
+                }
+              }
+
+              return (
+                <OrderRow
+                  key={order.order_id}
+                  order={order}
+                  uc={uc}
+                  isExpanded={isExpanded}
+                  indicatorColor={indicatorColor}
+                  undercutLoading={undercutLoading}
+                  formatIsk={formatIsk}
+                  toggleExpand={toggleExpand}
+                  t={t}
+                />
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+interface OrderDeskTabProps {
+  formatIsk: (v: number) => string;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
+}
+
+// Deprecated: now combined into ActiveOrdersWithDeskTab
+// @ts-ignore - keeping for reference
+function _OrderDeskTab({ formatIsk, t }: OrderDeskTabProps) {
+  const [salesTax, setSalesTax] = useState(8);
+  const [brokerFee, setBrokerFee] = useState(1);
+  const [targetEtaDays, setTargetEtaDays] = useState(3);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<OrderDeskResponse | null>(null);
+  const [side, setSide] = useState<"all" | "buy" | "sell">("all");
+
+  const loadDesk = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    getOrderDesk({ salesTax, brokerFee, targetEtaDays })
+      .then(setData)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [salesTax, brokerFee, targetEtaDays]);
+
+  useEffect(() => {
+    loadDesk();
+  }, [loadDesk]);
+
+  const rows = useMemo(() => {
+    const source = data?.orders ?? [];
+    if (side === "buy") return source.filter((o) => o.is_buy_order);
+    if (side === "sell") return source.filter((o) => !o.is_buy_order);
+    return source;
+  }, [data, side]);
+
+  if (loading && !data) {
+    return (
+      <div className="flex items-center justify-center h-full text-eve-dim text-xs">
+        <span className="inline-block w-4 h-4 border-2 border-eve-accent/40 border-t-eve-accent rounded-full animate-spin mr-2" />
+        {t("loading")}...
+      </div>
+    );
+  }
+
+  if (error && !data) {
+    return <div className="flex items-center justify-center h-full text-eve-error text-xs">{error}</div>;
+  }
+
+  const summary = data?.summary;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs text-eve-dim uppercase tracking-wider">{t("charOrderDeskTab")}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-eve-dim">{t("pnlSalesTax")}</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              value={salesTax}
+              onChange={(e) => setSalesTax(parseFloat(e.target.value) || 0)}
+              className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+            />
+          </div>
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-eve-dim">{t("pnlBrokerFee")}</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.1}
+              value={brokerFee}
+              onChange={(e) => setBrokerFee(parseFloat(e.target.value) || 0)}
+              className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+            />
+          </div>
+          <div className="flex items-center gap-1 text-[10px]">
+            <span className="text-eve-dim">{t("orderDeskTargetETA")}</span>
+            <input
+              type="number"
+              min={0.5}
+              max={60}
+              step={0.5}
+              value={targetEtaDays}
+              onChange={(e) => setTargetEtaDays(parseFloat(e.target.value) || 3)}
+              className="w-14 px-1 py-0.5 rounded-sm border border-eve-border bg-eve-dark text-eve-text"
+            />
+          </div>
+          <button
+            onClick={loadDesk}
+            className="px-2.5 py-1 text-[10px] rounded-sm border bg-eve-panel border-eve-border text-eve-dim hover:text-eve-text hover:border-eve-accent/50"
+          >
+            {t("charRefresh")}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-eve-error/10 border border-eve-error/30 rounded-sm px-3 py-2 text-xs text-eve-error">
+          {error}
+        </div>
+      )}
+
+      {summary && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatCard label={t("charTotalOrders")} value={String(summary.total_orders)} subvalue={`${summary.buy_orders} BUY / ${summary.sell_orders} SELL`} />
+          <StatCard
+            label={t("orderDeskNeedAction")}
+            value={String(summary.needs_reprice + summary.needs_cancel)}
+            subvalue={`${summary.needs_reprice} reprice / ${summary.needs_cancel} cancel`}
+            color={(summary.needs_reprice + summary.needs_cancel) > 0 ? "text-eve-warning" : "text-eve-profit"}
+          />
+          <StatCard
+            label={t("orderDeskMedianETA")}
+            value={summary.median_eta_days > 0 ? `${summary.median_eta_days.toFixed(1)}d` : "—"}
+            subvalue={`${summary.unknown_eta_count} ${t("orderDeskUnknownETA").toLowerCase()}`}
+          />
+          <StatCard label={t("orderDeskNotional")} value={`${formatIsk(summary.total_notional)} ISK`} />
+        </div>
+      )}
+
+      {data && data.orders.length > 0 && (
+        <div className="flex gap-2">
+          <FilterBtn active={side === "all"} onClick={() => setSide("all")} label={t("charAll")} count={data.orders.length} />
+          <FilterBtn active={side === "buy"} onClick={() => setSide("buy")} label={t("charBuy")} count={data.orders.filter((o) => o.is_buy_order).length} color="text-eve-profit" />
+          <FilterBtn active={side === "sell"} onClick={() => setSide("sell")} label={t("charSell")} count={data.orders.filter((o) => !o.is_buy_order).length} color="text-eve-error" />
+        </div>
+      )}
+
+      {!data || data.orders.length === 0 ? (
+        <div className="text-center text-eve-dim py-8">{t("orderDeskNoOrders")}</div>
+      ) : (
+        <div className="border border-eve-border rounded-sm overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-eve-panel">
+              <tr className="text-eve-dim">
+                <th className="px-2 py-2 text-left">{t("orderDeskAction")}</th>
+                <th className="px-2 py-2 text-left">{t("charOrderType")}</th>
+                <th className="px-2 py-2 text-left">{t("colItemName")}</th>
+                <th className="px-2 py-2 text-right">{t("charPrice")}</th>
+                <th className="px-2 py-2 text-right">{t("charVolume")}</th>
+                <th className="px-2 py-2 text-right">{t("orderDeskQueueAhead")}</th>
+                <th className="px-2 py-2 text-right">{t("orderDeskETA")}</th>
+                <th className="px-2 py-2 text-right">{t("orderDeskExpiry")}</th>
+                <th className="px-2 py-2 text-right">{t("orderDeskSuggested")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const sideClass = row.is_buy_order ? "text-eve-profit" : "text-eve-error";
+                const etaLabel = row.eta_days >= 0 ? `${row.eta_days.toFixed(1)}d` : "—";
+                return (
+                  <tr key={row.order_id} className="border-t border-eve-border/50 hover:bg-eve-panel/50">
+                    <td className="px-2 py-2">
+                      <span
+                        className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                          row.recommendation === "cancel"
+                            ? "bg-red-500/20 text-red-400"
+                            : row.recommendation === "reprice"
+                              ? "bg-amber-500/20 text-amber-400"
+                              : "bg-emerald-500/20 text-emerald-400"
+                        }`}
+                        title={row.reason}
+                      >
+                        {row.recommendation.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className={`px-2 py-2 ${sideClass}`}>{row.is_buy_order ? "BUY" : "SELL"} #{row.position}/{row.total_orders}</td>
+                    <td className="px-2 py-2 text-eve-text max-w-[220px] truncate" title={row.type_name}>{row.type_name || `#${row.type_id}`}</td>
+                    <td className="px-2 py-2 text-right text-eve-accent">{formatIsk(row.price)}</td>
+                    <td className="px-2 py-2 text-right text-eve-dim">{row.volume_remain.toLocaleString()}</td>
+                    <td className="px-2 py-2 text-right text-eve-dim">{row.queue_ahead_qty.toLocaleString()}</td>
+                    <td className={`px-2 py-2 text-right ${row.eta_days >= 0 && row.eta_days > targetEtaDays ? "text-eve-warning" : "text-eve-dim"}`}>{etaLabel}</td>
+                    <td className={`px-2 py-2 text-right ${row.days_to_expire >= 0 && row.days_to_expire <= 2 ? "text-eve-warning" : "text-eve-dim"}`}>{row.days_to_expire >= 0 ? `${row.days_to_expire}d` : "—"}</td>
+                    <td className="px-2 py-2 text-right text-eve-text">{formatIsk(row.suggested_price)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -1636,10 +2343,13 @@ function StatCard({
 interface OrdersTabProps {
   orders: CharacterOrder[];
   formatIsk: (v: number) => string;
+  onOpenOrderDesk: () => void;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }
 
-function OrdersTab({ orders, formatIsk, t }: OrdersTabProps) {
+// Deprecated: now combined into ActiveOrdersWithDeskTab
+// @ts-ignore - keeping for reference
+function _OrdersTab({ orders, formatIsk, onOpenOrderDesk, t }: OrdersTabProps) {
   const [filter, setFilter] = useState<"all" | "buy" | "sell">("all");
   const [expandedOrder, setExpandedOrder] = useState<number | null>(null);
   const [undercuts, setUndercuts] = useState<Record<number, UndercutStatus>>({});
@@ -1682,10 +2392,16 @@ function OrdersTab({ orders, formatIsk, t }: OrdersTabProps) {
   return (
     <div className="space-y-3">
       {/* Filter */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-center flex-wrap">
         <FilterBtn active={filter === "all"} onClick={() => setFilter("all")} label={t("charAll")} count={orders.length} />
         <FilterBtn active={filter === "buy"} onClick={() => setFilter("buy")} label={t("charBuy")} count={orders.filter((o) => o.is_buy_order).length} color="text-eve-profit" />
         <FilterBtn active={filter === "sell"} onClick={() => setFilter("sell")} label={t("charSell")} count={orders.filter((o) => !o.is_buy_order).length} color="text-eve-error" />
+        <button
+          onClick={onOpenOrderDesk}
+          className="px-2.5 py-1 text-[10px] rounded-sm border border-eve-border text-eve-dim hover:text-eve-text hover:border-eve-accent/50"
+        >
+          {t("orderDeskOpen")}
+        </button>
       </div>
 
       {/* Undercut error */}
