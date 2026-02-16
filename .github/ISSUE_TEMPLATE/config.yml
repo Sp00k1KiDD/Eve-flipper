@@ -1,8 +1,0 @@
-blank_issues_enabled: true
-contact_links:
-  - name: Documentation / Wiki
-    url: https://github.com/ilyaux/Eve-flipper/wiki
-    about: Check the wiki for guides and FAQ
-  - name: Discussions
-    url: https://github.com/ilyaux/Eve-flipper/discussions
-    about: Ask questions or share ideas (if enabled)
